@@ -34,7 +34,7 @@ Baqiyyah is more than just an app; it is your daily spiritual companion. Whether
   <img src="https://github.com/sam-edit/Baqqiyah/blob/assets/screenshots/hadeeth.jpg" width="140">
   <img src="https://github.com/sam-edit/Baqqiyah/blob/assets/screenshots/goals.jpg" width="140">
   <img src="https://github.com/sam-edit/Baqqiyah/blob/assets/screenshots/more.jpg" width="140">
-  <img src="https://github.com/ruleno1studio/Baqqiyah/blob/assets/screenshots/feedback.jpg" width="140">
+  <img src="https://github.com/sam-edit/Baqqiyah/blob/assets/screenshots/feedback.jpg" width="140">
 </p>
 
 ## 🛠️ Technology
