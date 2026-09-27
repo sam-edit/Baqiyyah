@@ -63,7 +63,6 @@ Baqiyyah uses established Islamic APIs and services for different features:
 
 ### Contributors
 
-* **Muhammad Waseem** — Developer — [wasiwithheart@gmail.com](mailto:wasiwithheart@gmail.com)
 * **Muhammad Samran** — Developer — [samranansar00@gmail.com](mailto:samranansar00@gmail.com)
 
 Baqiyyah is currently being developed collaboratively by the contributors listed above.
