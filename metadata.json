@@ -1,6 +1,0 @@
-{
-  "name": "Baqiyyah",
-  "description": "Modern Islamic app for prayer times, Quran, Hadith, daily worship goals, and spiritual utilities.",
-  "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
-}
