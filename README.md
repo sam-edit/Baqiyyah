@@ -29,12 +29,12 @@ Baqiyyah is more than just an app; it is your daily spiritual companion. Whether
 ## 📱 Screenshots
 
 <p align="center">
-  <img src="https://github.com/sam-edit/Baqqiyah/assets/screenshots/home.jpg" width="140">
-  <img src="https://github.com/sam-edit/Baqqiyah/assets/screenshots/quran.jpg" width="140">
-  <img src="https://github.com/sam-edit/Baqqiyah/assets/screenshots/hadeeth.jpg" width="140">
-  <img src="https://github.com/sam-edit/Baqqiyah/assets/screenshots/goals.jpg" width="140">
-  <img src="https://github.com/sam-edit/Baqqiyah/assets/screenshots/more.jpg" width="140">
-  <img src="https://github.com/sam-edit/Baqqiyah/assets/screenshots/feedback.jpg" width="140">
+  <img src="https://github.com/sam-edit/Baqqiyah/blob/assets/screenshots/home.jpg" width="140">
+  <img src="https://github.com/sam-edit/Baqqiyah/blob/assets/screenshots/quran.jpg" width="140">
+  <img src="https://github.com/sam-edit/Baqqiyah/blob/assets/screenshots/hadeeth.jpg" width="140">
+  <img src="https://github.com/sam-edit/Baqqiyah/blob/assets/screenshots/goals.jpg" width="140">
+  <img src="https://github.com/sam-edit/Baqqiyah/blob/assets/screenshots/more.jpg" width="140">
+  <img src="https://github.com/sam-edit/Baqqiyah/blob/assets/screenshots/feedback.jpg" width="140">
 </p>
 
 ## 🛠️ Technology
