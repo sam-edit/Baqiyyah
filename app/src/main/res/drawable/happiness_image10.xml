@@ -1,0 +1,63 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="800dp"
+    android:height="800dp"
+    android:viewportWidth="800"
+    android:viewportHeight="800">
+
+    <!-- Deep Emerald Green Gradient Background -->
+    <path
+        android:pathData="M0,0 L800,0 L800,800 L0,800 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:angle="270"
+                android:startColor="#052618"
+                android:centerColor="#0B3D26"
+                android:endColor="#02140C"
+                android:type="linear" />
+        </aapt:attr>
+    </path>
+
+    <!-- Golden Emerald Central Radial Bloom -->
+    <path
+        android:pathData="M150,150 a250,250 0 1,0 500,0 a250,250 0 1,0 -500,0">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:gradientRadius="350"
+                android:centerX="400"
+                android:centerY="400"
+                android:startColor="#2EE0A944"
+                android:endColor="#00000000"
+                android:type="radial" />
+        </aapt:attr>
+    </path>
+
+    <!-- Geometric 8-pointed star in center -->
+    <!-- Square 1 -->
+    <path
+        android:pathData="M260,260 L540,260 L540,540 L260,540 Z"
+        android:strokeWidth="1.5"
+        android:fillColor="#00000000"
+        android:strokeColor="#66E0A944" />
+
+    <!-- Square 2 rotated 45 deg (approx via path) -->
+    <path
+        android:pathData="M400,202 L598,400 L400,598 L202,400 Z"
+        android:strokeWidth="1.5"
+        android:fillColor="#00000000"
+        android:strokeColor="#66E0A944" />
+
+    <!-- Outer Decorative Arch Pattern at Corners -->
+    <path
+        android:pathData="M40,40 L160,40 L160,60 C104,60 60,104 60,160 L40,160 Z"
+        android:fillColor="#33E0A944" />
+    <path
+        android:pathData="M760,40 L640,40 L640,60 C696,60 740,104 740,160 L760,160 Z"
+        android:fillColor="#33E0A944" />
+    <path
+        android:pathData="M40,760 L160,760 L160,740 C104,740 60,696 60,640 L40,640 Z"
+        android:fillColor="#33E0A944" />
+    <path
+        android:pathData="M760,760 L640,760 L640,740 C696,740 740,696 740,640 L760,640 Z"
+        android:fillColor="#33E0A944" />
+</vector>

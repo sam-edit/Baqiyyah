@@ -9,16 +9,19 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.togetherWith
+import androidx.compose.animation.*
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -28,7 +31,9 @@ import com.example.domain.model.HadithBook
 import com.example.domain.model.HadithChapter
 import com.example.ui.components.AlDeenBottomNav
 import com.example.ui.components.AlDeenDrawerContent
+import com.example.ui.components.CircularRevealDrawer
 import com.example.ui.components.NavTab
+import com.example.ui.theme.AlDeenMotion
 import com.example.ui.goals.GoalsScreen
 import com.example.ui.goals.GoalsViewModel
 import com.example.ui.hadith.BaabListScreen
@@ -46,16 +51,19 @@ import com.example.ui.settings.ContactUsScreen
 import com.example.ui.settings.SettingsScreen
 import com.example.ui.theme.AlDeenFontRegistry
 import com.example.ui.theme.AlDeenTheme
+import com.example.ui.donate.DonateUsScreen
 import kotlinx.coroutines.launch
 
-sealed class AppScreen {
+sealed class AppScreen : java.io.Serializable {
     object MainTab : AppScreen()
     object UniversalSearch : AppScreen()
+    object Quran16 : AppScreen()
     data class SurahReader(val surahNumber: Int, val scrollToAyah: Int? = null) : AppScreen()
     data class HadithBaabList(val book: HadithBook) : AppScreen()
     data class HadithReader(val chapter: HadithChapter, val scrollToHadith: String? = null) : AppScreen()
+    object ShareHappiness : AppScreen()
     object Qibla : AppScreen()
-    object Tasbeeh : AppScreen()
+    data class Tasbeeh(val initialPhraseId: String? = null) : AppScreen()
     object Calendar : AppScreen()
     object AllahNames : AppScreen()
     object Bookmarks : AppScreen()
@@ -63,11 +71,18 @@ sealed class AppScreen {
     object Settings : AppScreen()
     object AboutUs : AppScreen()
     object ContactUs : AppScreen()
+    object DonateUs : AppScreen()
 }
 
 class MainActivity : ComponentActivity() {
+    private val widgetNavigationTrigger = mutableStateOf<Pair<String, String?>?>(null)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (savedInstanceState == null) {
+            com.example.ui.quran.FloatingAudioButtonHolder.resetToDefault()
+        }
+        handleWidgetIntent(intent)
         AlDeenFontRegistry.init(applicationContext)
         enableEdgeToEdge()
         setContent {
@@ -75,33 +90,131 @@ class MainActivity : ComponentActivity() {
             val themeMode by settingsRepo.themeMode.collectAsStateWithLifecycle()
 
             AlDeenTheme(themeMode = themeMode) {
-                AlDeenApp(settingsRepo)
+                AlDeenApp(settingsRepo, widgetNavigationTrigger)
             }
         }
     }
+
+    override fun onResume() {
+        super.onResume()
+        com.example.notification.PrayerNotificationManager.rescheduleAlarmsFromSavedState(this)
+        try {
+            com.example.widget.PrayerWidgetProvider.updateAllWidgets(this)
+            com.example.widget.PrayerWidgetProvider.scheduleNextBoundaryUpdate(this)
+        } catch (_: Exception) {}
+    }
+
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleWidgetIntent(intent)
+    }
+
+    private fun handleWidgetIntent(intent: android.content.Intent?) {
+        val nav = intent?.getStringExtra("navigate_to")
+        if (nav != null) {
+            val phraseId = intent.getStringExtra("selected_phrase_id")
+            widgetNavigationTrigger.value = Pair(nav, phraseId)
+        }
+    }
+
+    // NOTE: the streaming cache is intentionally NOT cleared here. The activity is destroyed on
+    // back-press / rotation while audio keeps playing from QuranAudioService; wiping the cache now
+    // would pull it out from under the player. The cache is cleared by QuranAudioService
+    // (onTaskRemoved / onDestroy = app closed from Recents) and on the next app start.
 }
 
 @Composable
-fun AlDeenApp(settingsRepository: SettingsRepository) {
-    val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
+fun AlDeenApp(
+    settingsRepository: SettingsRepository,
+    widgetNavigationTrigger: MutableState<Pair<String, String?>?>? = null
+) {
+    val context = LocalContext.current
+    var isDrawerOpen by rememberSaveable { mutableStateOf(false) }
+    // True only when Settings is opened from the Home "Tap to change" note
+    var highlightCalcMethod by remember { mutableStateOf(false) }
     val coroutineScope = rememberCoroutineScope()
 
-    var currentTab by remember { mutableStateOf(NavTab.HOME) }
-    var currentScreen by remember { mutableStateOf<AppScreen>(AppScreen.MainTab) }
+    var currentTab by rememberSaveable { mutableStateOf(NavTab.HOME) }
+    var currentScreen by rememberSaveable { mutableStateOf<AppScreen>(AppScreen.MainTab) }
+    var showCityPicker by rememberSaveable { mutableStateOf(false) }
+    var isTopSupportStripeVisible by rememberSaveable { mutableStateOf(true) }
+
+    // Observe widget navigation requests (e.g. user tapped the home screen widget)
+    LaunchedEffect(widgetNavigationTrigger?.value) {
+        val trigger = widgetNavigationTrigger?.value
+        if (trigger != null) {
+            val (destination, param) = trigger
+            when (destination) {
+                "tasbeeh" -> {
+                    currentScreen = AppScreen.Tasbeeh(param)
+                }
+                "prayer_dashboard" -> {
+                    currentScreen = AppScreen.MainTab
+                    currentTab = NavTab.HOME
+                }
+                "city_picker" -> {
+                    currentScreen = AppScreen.MainTab
+                    currentTab = NavTab.HOME
+                    showCityPicker = true
+                }
+                "quran" -> {
+                    currentScreen = AppScreen.MainTab
+                    currentTab = NavTab.QURAN
+                }
+            }
+            widgetNavigationTrigger.value = null
+        }
+    }
 
     val homeViewModel: HomeViewModel = viewModel()
     val quranViewModel: QuranViewModel = viewModel()
     val hadithViewModel: HadithViewModel = viewModel()
     val goalsViewModel: GoalsViewModel = viewModel()
+    val donateViewModel: com.example.ui.donate.DonateViewModel = viewModel()
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    val isScreenActive = currentScreen is AppScreen.DonateUs
+    val bannerOnline = com.example.ui.components.rememberBannerOnline()
+    val startupBanners = com.example.ui.components.rememberStartupBanners(bannerOnline)
+    val homepageBanner = startupBanners.home
+    val moreBanner = startupBanners.more
+    val sideLoaderBanner = startupBanners.side
+    val popupBanner = startupBanners.popup
+
+    // AnimatedContent retains an outgoing screen until its animation finishes.
+    // Gate by the actual destination as well as the activity's resumed state.
+    DisposableEffect(donateViewModel, lifecycleOwner, isScreenActive, bannerOnline) {
+        val lifecycle = lifecycleOwner.lifecycle
+        fun updateConnection() {
+            if (isScreenActive && lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED)) {
+                if (bannerOnline) donateViewModel.startListening()
+                else donateViewModel.showOfflineCache()
+            } else {
+                donateViewModel.stopListeningAndGoOffline()
+            }
+        }
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            when (event) {
+                androidx.lifecycle.Lifecycle.Event.ON_RESUME -> updateConnection()
+                androidx.lifecycle.Lifecycle.Event.ON_PAUSE, androidx.lifecycle.Lifecycle.Event.ON_STOP, androidx.lifecycle.Lifecycle.Event.ON_DESTROY ->
+                    donateViewModel.stopListeningAndGoOffline()
+                else -> Unit
+            }
+        }
+        lifecycle.addObserver(observer)
+        updateConnection()
+        onDispose {
+            lifecycle.removeObserver(observer)
+            donateViewModel.stopListeningAndGoOffline()
+        }
+    }
+
 
     val location by homeViewModel.userLocation.collectAsStateWithLifecycle()
     val primaryLocation by homeViewModel.primaryLocation.collectAsStateWithLifecycle()
     val prayerState by homeViewModel.prayerState.collectAsStateWithLifecycle()
     val formattedCurrentTime = homeViewModel.formatTime(prayerState.currentPrayerTime)
     val formattedUpcomingTime = homeViewModel.formatTime(prayerState.upcomingPrayerTime)
-    var showCityPicker by remember { mutableStateOf(false) }
-
-    val context = androidx.compose.ui.platform.LocalContext.current
 
     // Request Location and Notification permissions simultaneously on app launch
     val permissionsToRequest = remember {
@@ -124,6 +237,33 @@ fun AlDeenApp(settingsRepository: SettingsRepository) {
         }
     }
 
+    // Re-detect the city whenever the app returns to the foreground, not only on a cold start,
+    // so someone who travelled sees their new city. A primary city, when set, always wins.
+    // (Startup still opens the location settings if GPS is off; this resume refresh stays silent.)
+    DisposableEffect(lifecycleOwner) {
+        var wasStopped = false
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            when (event) {
+                androidx.lifecycle.Lifecycle.Event.ON_STOP -> wasStopped = true
+                androidx.lifecycle.Lifecycle.Event.ON_START -> if (wasStopped) {
+                    wasStopped = false
+                    val hasPermission =
+                        androidx.core.content.ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) ==
+                            android.content.pm.PackageManager.PERMISSION_GRANTED ||
+                        androidx.core.content.ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) ==
+                            android.content.pm.PackageManager.PERMISSION_GRANTED
+                    if (hasPermission && homeViewModel.primaryLocation.value == null &&
+                        homeViewModel.settingsRepository.isDeviceLocationEnabled(context)) {
+                        homeViewModel.detectAndUseCurrentLocation()
+                    }
+                }
+                else -> Unit
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
     LaunchedEffect(Unit) {
         permissionLauncher.launch(permissionsToRequest)
         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
@@ -133,13 +273,13 @@ fun AlDeenApp(settingsRepository: SettingsRepository) {
 
     // Handle system back navigation:
     // Sub-section -> Main section -> Home -> Exit
-    val shouldInterceptBack = drawerState.isOpen ||
+    val shouldInterceptBack = isDrawerOpen ||
         currentScreen !is AppScreen.MainTab ||
         (currentScreen is AppScreen.MainTab && currentTab != NavTab.HOME)
 
     BackHandler(enabled = shouldInterceptBack) {
-        if (drawerState.isOpen) {
-            coroutineScope.launch { drawerState.close() }
+        if (isDrawerOpen) {
+            isDrawerOpen = false
         } else if (currentScreen !is AppScreen.MainTab) {
             when (currentScreen) {
                 is AppScreen.UniversalSearch -> {
@@ -154,16 +294,21 @@ fun AlDeenApp(settingsRepository: SettingsRepository) {
                     currentScreen = AppScreen.MainTab
                     currentTab = NavTab.HADEETH
                 }
+                is AppScreen.Quran16 -> {
+                    currentScreen = AppScreen.MainTab
+                    currentTab = NavTab.QURAN
+                }
                 is AppScreen.SurahReader -> {
                     currentScreen = AppScreen.MainTab
                     currentTab = NavTab.QURAN
                 }
-                is AppScreen.Qibla, is AppScreen.Tasbeeh, is AppScreen.Calendar,
+                is AppScreen.ShareHappiness, is AppScreen.Qibla, is AppScreen.Tasbeeh, is AppScreen.Calendar,
                 is AppScreen.AllahNames, is AppScreen.Bookmarks, is AppScreen.Duas -> {
                     currentScreen = AppScreen.MainTab
                     currentTab = NavTab.MORE
                 }
                 is AppScreen.Settings, is AppScreen.AboutUs -> {
+                    highlightCalcMethod = false
                     currentScreen = AppScreen.MainTab
                     if (currentTab == NavTab.HOME) {
                         homeViewModel.refreshMoments()
@@ -199,29 +344,45 @@ fun AlDeenApp(settingsRepository: SettingsRepository) {
         )
     }
 
-    ModalNavigationDrawer(
-        drawerState = drawerState,
-        drawerContent = {
-            AlDeenDrawerContent(
-                onAboutUsClick = {
-                    currentScreen = AppScreen.AboutUs
-                },
-                onContactUsClick = {
-                    currentScreen = AppScreen.ContactUs
-                },
-                onSettingsClick = {
-                    currentScreen = AppScreen.Settings
-                },
-                onCloseDrawer = {
-                    coroutineScope.launch { drawerState.close() }
-                }
-            )
-        }
+    // Popup ad on app open (cached first, then verified by the startup check).
+    com.example.ui.components.PopupBannerHost(state = popupBanner)
+
+    CircularRevealDrawer(
+        isOpen = isDrawerOpen,
+        onClose = { isDrawerOpen = false },
+        onAboutUsClick = {
+            isDrawerOpen = false
+            currentScreen = AppScreen.AboutUs
+        },
+        onDonateUsClick = {
+            isDrawerOpen = false
+            currentScreen = AppScreen.DonateUs
+        },
+        onContactUsClick = {
+            isDrawerOpen = false
+            currentScreen = AppScreen.ContactUs
+        },
+        onSettingsClick = {
+            isDrawerOpen = false
+            highlightCalcMethod = false
+            currentScreen = AppScreen.Settings
+        },
+        sideBanner = sideLoaderBanner
     ) {
         Scaffold(
             bottomBar = {
-                // Bottom bar is shown on Main Tab
-                if (currentScreen is AppScreen.MainTab) {
+                // Bottom bar is animated smoothly when navigating to/from sub-screens
+                AnimatedVisibility(
+                    visible = currentScreen is AppScreen.MainTab,
+                    enter = slideInVertically(
+                        initialOffsetY = { it },
+                        animationSpec = tween(AlDeenMotion.DurationQuick, easing = AlDeenMotion.EmphasizedDecelerateEasing)
+                    ) + fadeIn(animationSpec = tween(AlDeenMotion.DurationFast)),
+                    exit = slideOutVertically(
+                        targetOffsetY = { it },
+                        animationSpec = tween(AlDeenMotion.DurationFast, easing = AlDeenMotion.EmphasizedAccelerateEasing)
+                    ) + fadeOut(animationSpec = tween(AlDeenMotion.DurationFast))
+                ) {
                     AlDeenBottomNav(
                         currentTab = currentTab,
                         onTabSelected = { tab ->
@@ -241,119 +402,213 @@ fun AlDeenApp(settingsRepository: SettingsRepository) {
                     .fillMaxSize()
                     .padding(innerPadding)
             ) {
-                AnimatedContent(
-                    targetState = currentScreen,
-                    transitionSpec = { fadeIn() togetherWith fadeOut() },
+                Column(modifier = Modifier.fillMaxSize()) {
+                    // Top horizontal support stripe (above app name / header)
+                    AnimatedVisibility(
+                        visible = isTopSupportStripeVisible && currentScreen is AppScreen.MainTab,
+                        enter = expandVertically(animationSpec = tween(AlDeenMotion.DurationNormal, easing = AlDeenMotion.EmphasizedDecelerateEasing)) + fadeIn(),
+                        exit = shrinkVertically(animationSpec = tween(AlDeenMotion.DurationFast, easing = AlDeenMotion.EmphasizedAccelerateEasing)) + fadeOut()
+                    ) {
+                        com.example.ui.components.TopSupportStripe(
+                            onSupportClick = {
+                                currentScreen = AppScreen.DonateUs
+                            },
+                            onDismiss = {
+                                isTopSupportStripeVisible = false
+                            }
+                        )
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxWidth()
+                    ) {
+                        AnimatedContent(
+                            targetState = currentScreen,
+                    transitionSpec = {
+                        if (targetState is AppScreen.MainTab) {
+                            (fadeIn(animationSpec = tween(AlDeenMotion.DurationQuick, easing = AlDeenMotion.EmphasizedDecelerateEasing)) +
+                             slideIntoContainer(
+                                 towards = AnimatedContentTransitionScope.SlideDirection.End,
+                                 animationSpec = tween(AlDeenMotion.DurationNormal, easing = AlDeenMotion.EmphasizedDecelerateEasing),
+                                 initialOffset = { -it / 6 }
+                             ))
+                                .togetherWith(
+                                    fadeOut(animationSpec = tween(AlDeenMotion.DurationFast, easing = AlDeenMotion.EmphasizedAccelerateEasing)) +
+                                    slideOutOfContainer(
+                                        towards = AnimatedContentTransitionScope.SlideDirection.End,
+                                        animationSpec = tween(AlDeenMotion.DurationQuick, easing = AlDeenMotion.EmphasizedAccelerateEasing),
+                                        targetOffset = { it / 6 }
+                                    )
+                                )
+                        } else {
+                            (fadeIn(animationSpec = tween(AlDeenMotion.DurationQuick, easing = AlDeenMotion.EmphasizedDecelerateEasing)) +
+                             slideIntoContainer(
+                                 towards = AnimatedContentTransitionScope.SlideDirection.Start,
+                                 animationSpec = tween(AlDeenMotion.DurationNormal, easing = AlDeenMotion.EmphasizedDecelerateEasing),
+                                 initialOffset = { it / 6 }
+                             ))
+                                .togetherWith(
+                                    fadeOut(animationSpec = tween(AlDeenMotion.DurationFast, easing = AlDeenMotion.EmphasizedAccelerateEasing)) +
+                                    slideOutOfContainer(
+                                        towards = AnimatedContentTransitionScope.SlideDirection.Start,
+                                        animationSpec = tween(AlDeenMotion.DurationQuick, easing = AlDeenMotion.EmphasizedAccelerateEasing),
+                                        targetOffset = { -it / 6 }
+                                    )
+                                )
+                        }
+                    },
                     label = "screen_transition"
                 ) { screen ->
                     when (screen) {
+                        is AppScreen.Quran16 -> com.example.ui.quran16.Quran16Screen(
+                            onBack = { currentScreen = AppScreen.MainTab; currentTab = NavTab.QURAN }
+                        )
                         is AppScreen.MainTab -> {
-                            when (currentTab) {
-                                NavTab.HOME -> HomeScreen(
-                                    viewModel = homeViewModel,
-                                    onOpenDrawer = {
-                                        coroutineScope.launch { drawerState.open() }
-                                    },
-                                    onOpenSearch = {
-                                        currentScreen = AppScreen.UniversalSearch
-                                    },
-                                    onOpenAyah = { surahNum, ayahNum ->
-                                        quranViewModel.openSurah(surahNum, fromPara = false)
-                                        currentScreen = AppScreen.SurahReader(surahNum, scrollToAyah = ayahNum)
-                                    },
-                                    onOpenHadith = { bookSlug, chapterNum, hadithNum ->
-                                        val chapter = hadithViewModel.openHadith(bookSlug, chapterNum, hadithNum)
-                                        currentScreen = AppScreen.HadithReader(chapter, scrollToHadith = hadithNum)
+                            AnimatedContent(
+                                targetState = currentTab,
+                                transitionSpec = {
+                                    val direction = if (targetState.ordinal >= initialState.ordinal) {
+                                        AnimatedContentTransitionScope.SlideDirection.Start
+                                    } else {
+                                        AnimatedContentTransitionScope.SlideDirection.End
                                     }
-                                )
-                                NavTab.QURAN -> QuranScreen(
-                                    viewModel = quranViewModel,
-                                    prayerState = prayerState,
-                                    location = location,
-                                    formattedCurrentTime = formattedCurrentTime,
-                                    formattedUpcomingTime = formattedUpcomingTime,
-                                    onOpenDrawer = {
-                                        coroutineScope.launch { drawerState.open() }
-                                    },
-                                    onLocationClick = {
-                                        showCityPicker = true
-                                    },
-                                    onSurahSelected = { surahNum ->
-                                        quranViewModel.openSurah(surahNum, fromPara = false)
-                                        currentScreen = AppScreen.SurahReader(surahNum)
-                                    },
-                                    onAyahSelected = { surahNum, ayahNum ->
-                                        quranViewModel.openSurah(surahNum, fromPara = false)
-                                        currentScreen = AppScreen.SurahReader(surahNum, scrollToAyah = ayahNum)
-                                    }
-                                )
-                                NavTab.HADEETH -> HadithScreen(
-                                    viewModel = hadithViewModel,
-                                    prayerState = prayerState,
-                                    location = location,
-                                    formattedCurrentTime = formattedCurrentTime,
-                                    formattedUpcomingTime = formattedUpcomingTime,
-                                    onOpenDrawer = {
-                                        coroutineScope.launch { drawerState.open() }
-                                    },
-                                    onLocationClick = {
-                                        showCityPicker = true
-                                    },
-                                    onBookSelected = { book ->
-                                        hadithViewModel.selectBook(book)
-                                        currentScreen = AppScreen.HadithBaabList(book)
-                                    },
-                                    onOpenHadith = { bookSlug, chapterNum, hadithNum ->
-                                        val chapter = hadithViewModel.openHadith(bookSlug, chapterNum, hadithNum)
-                                        currentScreen = AppScreen.HadithReader(chapter, scrollToHadith = hadithNum)
-                                    }
-                                )
-                                NavTab.GOALS -> GoalsScreen(
-                                    viewModel = goalsViewModel,
-                                    prayerState = prayerState,
-                                    location = location,
-                                    formattedCurrentTime = formattedCurrentTime,
-                                    formattedUpcomingTime = formattedUpcomingTime,
-                                    onOpenDrawer = {
-                                        coroutineScope.launch { drawerState.open() }
-                                    },
-                                    onLocationClick = {
-                                        showCityPicker = true
-                                    }
-                                )
-                                NavTab.MORE -> MoreScreen(
-                                    prayerState = prayerState,
-                                    location = location,
-                                    formattedCurrentTime = formattedCurrentTime,
-                                    formattedUpcomingTime = formattedUpcomingTime,
-                                    onOpenDrawer = {
-                                        coroutineScope.launch { drawerState.open() }
-                                    },
-                                    onLocationClick = {
-                                        showCityPicker = true
-                                    },
-                                    onNavigateToItem = { route ->
-                                        when (route) {
-                                            "more_find_masjid" -> {
-                                                try {
-                                                    val mapIntent = android.content.Intent(
-                                                        android.content.Intent.ACTION_VIEW,
-                                                        android.net.Uri.parse("https://www.google.com/maps/search/Masjid+Near+Me")
-                                                    )
-                                                    context.startActivity(mapIntent)
-                                                } catch (e: Exception) {
-                                                    // ignore
+                                    (slideIntoContainer(
+                                        towards = direction,
+                                        animationSpec = tween(AlDeenMotion.DurationQuick, easing = AlDeenMotion.EmphasizedDecelerateEasing),
+                                        initialOffset = { it / 10 }
+                                    ) + fadeIn(animationSpec = tween(AlDeenMotion.DurationFast, easing = AlDeenMotion.EmphasizedDecelerateEasing)))
+                                        .togetherWith(
+                                            slideOutOfContainer(
+                                                towards = direction,
+                                                animationSpec = tween(AlDeenMotion.DurationFast, easing = AlDeenMotion.EmphasizedAccelerateEasing),
+                                                targetOffset = { -it / 10 }
+                                            ) + fadeOut(animationSpec = tween(AlDeenMotion.DurationFast, easing = AlDeenMotion.EmphasizedAccelerateEasing))
+                                        )
+                                },
+                                label = "tab_transition"
+                            ) { tab ->
+                                when (tab) {
+                                    NavTab.HOME -> HomeScreen(
+                                        bannerState = homepageBanner,
+                                        viewModel = homeViewModel,
+                                        onOpenDrawer = {
+                                            isDrawerOpen = !isDrawerOpen
+                                        },
+                                        onOpenSearch = {
+                                            currentScreen = AppScreen.UniversalSearch
+                                        },
+                                        onOpenAyah = { surahNum, ayahNum ->
+                                            quranViewModel.openSurah(surahNum, fromPara = false)
+                                            currentScreen = AppScreen.SurahReader(surahNum, scrollToAyah = ayahNum)
+                                        },
+                                        onOpenHadith = { bookSlug, chapterNum, hadithNum ->
+                                            val chapter = hadithViewModel.openHadith(bookSlug, chapterNum, hadithNum)
+                                            currentScreen = AppScreen.HadithReader(chapter, scrollToHadith = hadithNum)
+                                        },
+                                        onOpenCalculationSettings = {
+                                            highlightCalcMethod = true
+                                            currentScreen = AppScreen.Settings
+                                        },
+                                        isDrawerOpen = isDrawerOpen
+                                    )
+                                    NavTab.QURAN -> QuranScreen(
+                                        onOpen16LineQuran = { currentScreen = AppScreen.Quran16 },
+                                        viewModel = quranViewModel,
+                                        prayerState = prayerState,
+                                        location = location,
+                                        formattedCurrentTime = formattedCurrentTime,
+                                        formattedUpcomingTime = formattedUpcomingTime,
+                                        onOpenDrawer = {
+                                            isDrawerOpen = !isDrawerOpen
+                                        },
+                                        onLocationClick = {
+                                            showCityPicker = true
+                                        },
+                                        onSurahSelected = { surahNum ->
+                                            quranViewModel.openSurah(surahNum, fromPara = false)
+                                            currentScreen = AppScreen.SurahReader(surahNum)
+                                        },
+                                        onAyahSelected = { surahNum, ayahNum ->
+                                            quranViewModel.openSurah(surahNum, fromPara = false)
+                                            currentScreen = AppScreen.SurahReader(surahNum, scrollToAyah = ayahNum)
+                                        },
+                                        isDrawerOpen = isDrawerOpen
+                                    )
+                                    NavTab.HADEETH -> HadithScreen(
+                                        viewModel = hadithViewModel,
+                                        prayerState = prayerState,
+                                        location = location,
+                                        formattedCurrentTime = formattedCurrentTime,
+                                        formattedUpcomingTime = formattedUpcomingTime,
+                                        onOpenDrawer = {
+                                            isDrawerOpen = !isDrawerOpen
+                                        },
+                                        onLocationClick = {
+                                            showCityPicker = true
+                                        },
+                                        onBookSelected = { book ->
+                                            hadithViewModel.selectBook(book)
+                                            currentScreen = AppScreen.HadithBaabList(book)
+                                        },
+                                        onOpenHadith = { bookSlug, chapterNum, hadithNum ->
+                                            val chapter = hadithViewModel.openHadith(bookSlug, chapterNum, hadithNum)
+                                            currentScreen = AppScreen.HadithReader(chapter, scrollToHadith = hadithNum)
+                                        },
+                                        isDrawerOpen = isDrawerOpen
+                                    )
+                                    NavTab.GOALS -> GoalsScreen(
+                                        viewModel = goalsViewModel,
+                                        prayerState = prayerState,
+                                        location = location,
+                                        formattedCurrentTime = formattedCurrentTime,
+                                        formattedUpcomingTime = formattedUpcomingTime,
+                                        onOpenDrawer = {
+                                            isDrawerOpen = !isDrawerOpen
+                                        },
+                                        onLocationClick = {
+                                            showCityPicker = true
+                                        },
+                                        isDrawerOpen = isDrawerOpen
+                                    )
+                                    NavTab.MORE -> MoreScreen(
+                                        bannerState = moreBanner,
+                                        prayerState = prayerState,
+                                        location = location,
+                                        formattedCurrentTime = formattedCurrentTime,
+                                        formattedUpcomingTime = formattedUpcomingTime,
+                                        onOpenDrawer = {
+                                            isDrawerOpen = !isDrawerOpen
+                                        },
+                                        onLocationClick = {
+                                            showCityPicker = true
+                                        },
+                                        onNavigateToItem = { route ->
+                                            when (route) {
+                                                "more_find_masjid" -> {
+                                                    try {
+                                                        val mapIntent = android.content.Intent(
+                                                            android.content.Intent.ACTION_VIEW,
+                                                            android.net.Uri.parse("https://www.google.com/maps/search/Masjid+Near+Me")
+                                                        )
+                                                        context.startActivity(mapIntent)
+                                                    } catch (e: Exception) {
+                                                        // ignore
+                                                    }
                                                 }
+                                                "more_share_happiness" -> currentScreen = AppScreen.ShareHappiness
+                                                "more_qibla" -> currentScreen = AppScreen.Qibla
+                                                "more_tasbeeh" -> currentScreen = AppScreen.Tasbeeh()
+                                                "more_calendar" -> currentScreen = AppScreen.Calendar
+                                                "more_allah_names" -> currentScreen = AppScreen.AllahNames
+                                                "more_bookmarks" -> currentScreen = AppScreen.Bookmarks
+                                                "more_duas" -> currentScreen = AppScreen.Duas
                                             }
-                                            "more_qibla" -> currentScreen = AppScreen.Qibla
-                                            "more_tasbeeh" -> currentScreen = AppScreen.Tasbeeh
-                                            "more_calendar" -> currentScreen = AppScreen.Calendar
-                                            "more_allah_names" -> currentScreen = AppScreen.AllahNames
-                                            "more_bookmarks" -> currentScreen = AppScreen.Bookmarks
-                                            "more_duas" -> currentScreen = AppScreen.Duas
-                                        }
-                                    }
-                                )
+                                        },
+                                        isDrawerOpen = isDrawerOpen
+                                    )
+                                }
                             }
                         }
 
@@ -421,6 +676,13 @@ fun AlDeenApp(settingsRepository: SettingsRepository) {
                             scrollToHadith = screen.scrollToHadith
                         )
 
+                        is AppScreen.ShareHappiness -> com.example.ui.happiness.ShareHappinessScreen(
+                            onBack = {
+                                currentScreen = AppScreen.MainTab
+                                currentTab = NavTab.MORE
+                            }
+                        )
+
                         is AppScreen.Qibla -> QiblaScreen(
                             userLocation = homeViewModel.userLocation.value,
                             onBack = {
@@ -430,6 +692,7 @@ fun AlDeenApp(settingsRepository: SettingsRepository) {
                         )
 
                         is AppScreen.Tasbeeh -> TasbeehScreen(
+                            initialPhraseId = screen.initialPhraseId,
                             onBack = {
                                 currentScreen = AppScreen.MainTab
                                 currentTab = NavTab.MORE
@@ -472,7 +735,9 @@ fun AlDeenApp(settingsRepository: SettingsRepository) {
 
                         is AppScreen.Settings -> SettingsScreen(
                             settingsRepository = settingsRepository,
+                            highlightCalcMethod = highlightCalcMethod,
                             onBack = {
+                                highlightCalcMethod = false
                                 currentScreen = AppScreen.MainTab
                             }
                         )
@@ -488,7 +753,22 @@ fun AlDeenApp(settingsRepository: SettingsRepository) {
                                 currentScreen = AppScreen.MainTab
                             }
                         )
+
+                        is AppScreen.DonateUs -> DonateUsScreen(
+                            isScreenActive = isScreenActive,
+                            viewModel = donateViewModel,
+                            onBack = {
+                                currentScreen = AppScreen.MainTab
+                            }
+                        )
                     }
+                }
+                    }
+                }
+
+                // Global floating audio player and headphone button host across the 5 main sections and 16 Line Quran
+                if (currentScreen is AppScreen.MainTab || currentScreen is AppScreen.Quran16) {
+                    com.example.ui.quran.QuranGlobalFloatingPlayerHost(viewModel = quranViewModel)
                 }
             }
         }

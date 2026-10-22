@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Baqiyyah Dark Emerald / Forest Palette -->
+    <color name="widget_emerald_primary">#2DD4A2</color>
+    <color name="widget_emerald_dark">#0B3A2C</color>
+    <color name="widget_emerald_deep">#0A261D</color>
+    <color name="widget_emerald_container">#134235</color>
+    <color name="widget_emerald_surface">#0F1D18</color>
+    <color name="widget_border_mint">#2E453E</color>
+    <color name="widget_border_mint_light">#40685C</color>
+    <color name="widget_gold_accent">#FACC15</color>
+    <color name="widget_gold_container">#2B240B</color>
+
+    <!-- Text Colors -->
+    <color name="widget_text_primary">#F0F6F3</color>
+    <color name="widget_text_secondary">#A0B5AC</color>
+    <color name="widget_text_tertiary">#768E85</color>
+    <color name="widget_text_on_primary">#052A20</color>
+
+    <!-- Action Buttons -->
+    <color name="widget_btn_increment">#2DD4A2</color>
+    <color name="widget_btn_reset_bg">#1A2E26</color>
+    <color name="widget_btn_reset_pressed">#243F34</color>
+    <color name="widget_progress_track">#19352B</color>
+</resources>

@@ -18,7 +18,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     private val database = AlDeenDatabase.getInstance(application)
     val bookmarksRepository = BookmarksRepository(database.bookmarkDao())
     val prayerRepository = PrayerRepository(settingsRepository, viewModelScope)
-    val audioPlayer = QuranAudioPlayer(application)
+    val audioPlayer = QuranAudioPlayer.getInstance(application)
 
     val userLocation: StateFlow<UserLocation> = settingsRepository.userLocation
     val dailySchedule: StateFlow<DailyPrayerSchedule> = prayerRepository.dailySchedule
@@ -127,39 +127,6 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     val bookmarkedReferences: StateFlow<Set<String>> = bookmarksRepository.allBookmarks
         .map { list -> list.map { it.referenceId }.toSet() }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptySet())
-
-    init {
-        // Automatically schedule alarms for every prayer using Primary Location (if set) or active location
-        viewModelScope.launch {
-            combine(
-                settingsRepository.primaryLocation,
-                settingsRepository.userLocation,
-                settingsRepository.prayerNotifications,
-                settingsRepository.calculationMethod,
-                settingsRepository.juristicSchool
-            ) { primaryLoc, activeLoc, notifs, method, school ->
-                val notifLoc = primaryLoc ?: activeLoc
-                val zoneId = settingsRepository.getZoneIdForLocation(notifLoc)
-                val todayDate = java.time.LocalDate.now(zoneId)
-                val schedule = com.example.domain.prayer.PrayerCalculationEngine.calculateDailySchedule(
-                    date = todayDate,
-                    latitude = notifLoc.latitude,
-                    longitude = notifLoc.longitude,
-                    method = method,
-                    juristicSchool = school,
-                    timeZone = zoneId
-                )
-                Triple(schedule, notifLoc, notifs)
-            }.collectLatest { (schedule, notifLoc, notifs) ->
-                PrayerNotificationManager.scheduleDailyPrayerAlarms(
-                    context = getApplication(),
-                    schedule = schedule,
-                    cityName = notifLoc.cityName,
-                    notificationSettings = notifs
-                )
-            }
-        }
-    }
 
     fun updateLocation(location: UserLocation) {
         settingsRepository.updateLocation(location)

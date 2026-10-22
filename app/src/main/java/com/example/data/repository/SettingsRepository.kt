@@ -9,6 +9,7 @@ import android.location.LocationManager
 import androidx.core.content.ContextCompat
 import com.example.domain.model.CalculationMethod
 import com.example.domain.model.JuristicSchool
+import com.example.domain.model.PrayerAlertType
 import com.example.domain.model.PrayerType
 import com.example.domain.model.UserLocation
 import com.example.ui.theme.AppThemeMode
@@ -17,7 +18,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import java.util.Locale
 
-class SettingsRepository(private val context: Context) {
+class SettingsRepository(val context: Context) {
     private val prefs: SharedPreferences = context.getSharedPreferences("al_deen_prefs", Context.MODE_PRIVATE)
 
     // Primary Location: Persistent location for notifications and cold-start app launch
@@ -31,7 +32,8 @@ class SettingsRepository(private val context: Context) {
                     countryName = prefs.getString("primary_country_name", "") ?: "",
                     latitude = prefs.getString("primary_latitude", "0.0")?.toDoubleOrNull() ?: 0.0,
                     longitude = prefs.getString("primary_longitude", "0.0")?.toDoubleOrNull() ?: 0.0,
-                    isAutoDetected = prefs.getBoolean("primary_is_auto", false)
+                    isAutoDetected = prefs.getBoolean("primary_is_auto", false),
+                    timeZoneId = prefs.getString("primary_tz", null)
                 )
             } else {
                 null
@@ -48,14 +50,16 @@ class SettingsRepository(private val context: Context) {
             if (primary != null) {
                 primary
             } else {
-                val savedCity = prefs.getString("city_name", null)
+                val detected = prefs.contains("detected_city")
+                val savedCity = prefs.getString(if (detected) "detected_city" else "city_name", null)
                 if (savedCity != null) {
                     UserLocation(
                         cityName = savedCity,
-                        countryName = prefs.getString("country_name", "") ?: "",
-                        latitude = prefs.getString("latitude", "0.0")?.toDoubleOrNull() ?: 0.0,
-                        longitude = prefs.getString("longitude", "0.0")?.toDoubleOrNull() ?: 0.0,
-                        isAutoDetected = prefs.getBoolean("is_auto_detected", false)
+                        countryName = prefs.getString(if (detected) "detected_country" else "country_name", "") ?: "",
+                        latitude = prefs.getString(if (detected) "detected_lat" else "latitude", "0.0")?.toDoubleOrNull() ?: 0.0,
+                        longitude = prefs.getString(if (detected) "detected_lon" else "longitude", "0.0")?.toDoubleOrNull() ?: 0.0,
+                        isAutoDetected = detected || prefs.getBoolean("is_auto_detected", false),
+                        timeZoneId = prefs.getString(if (detected) "detected_tz" else "tz", null)
                     )
                 } else {
                     UserLocation(
@@ -71,12 +75,23 @@ class SettingsRepository(private val context: Context) {
     )
     val userLocation: StateFlow<UserLocation> = _userLocation.asStateFlow()
 
-    init {
-        // Attempt initial detection immediately if permission is available, but ONLY if user hasn't pinned a primary location
-        if (_primaryLocation.value == null) {
-            detectAndUseCurrentLocation(context)
-        }
-    }
+    // Background startup must never request GPS or launch a settings screen.
+    // Remember GPS separately from temporary city previews.
+    private val _lastDetectedLocation = MutableStateFlow<UserLocation?>(run {
+        val city = prefs.getString("detected_city", null)
+        if (city != null) UserLocation(city, prefs.getString("detected_country", "") ?: "",
+            prefs.getString("detected_lat", "0")?.toDoubleOrNull() ?: 0.0,
+            prefs.getString("detected_lon", "0")?.toDoubleOrNull() ?: 0.0, true,
+            prefs.getString("detected_tz", null))
+        else if (prefs.getBoolean("is_auto_detected", false) && prefs.contains("city_name")) {
+            UserLocation(prefs.getString("city_name", "Current Location") ?: "Current Location",
+                prefs.getString("country_name", "") ?: "",
+                prefs.getString("latitude", "0")?.toDoubleOrNull() ?: 0.0,
+                prefs.getString("longitude", "0")?.toDoubleOrNull() ?: 0.0, true,
+                prefs.getString("tz", null))
+        } else _userLocation.value.takeIf { it.isAutoDetected && (it.latitude != 0.0 || it.longitude != 0.0) }
+    })
+    val lastDetectedLocation: StateFlow<UserLocation?> = _lastDetectedLocation.asStateFlow()
 
     // Theme Mode (Default SYSTEM)
     private val _themeMode = MutableStateFlow(
@@ -135,6 +150,12 @@ class SettingsRepository(private val context: Context) {
     private val _isQuietMode = MutableStateFlow(prefs.getBoolean("is_quiet_mode", false))
     val isQuietMode: StateFlow<Boolean> = _isQuietMode.asStateFlow()
 
+    // Prayer Alert Type (Default is LIGHT)
+    private val _prayerAlertType = MutableStateFlow(
+        PrayerAlertType.fromId(prefs.getString("prayer_alert_type", PrayerAlertType.LIGHT.id))
+    )
+    val prayerAlertType: StateFlow<PrayerAlertType> = _prayerAlertType.asStateFlow()
+
     // Per-prayer notification map
     private val _prayerNotifications = MutableStateFlow(
         PrayerType.values().associateWith { prayer ->
@@ -145,28 +166,79 @@ class SettingsRepository(private val context: Context) {
     )
     val prayerNotifications: StateFlow<Map<PrayerType, Boolean>> = _prayerNotifications.asStateFlow()
 
+    /**
+     * Shows [location]. A GPS-detected location becomes the "last detected" city; a city picked
+     * manually from the list is only a preview: it never touches the cache, alarms or widgets
+     * (those follow the primary city, or else the last detected city).
+     */
     fun updateLocation(location: UserLocation, autoAlignMethod: Boolean = true) {
+        val backgroundBefore = getBackgroundLocation()
+        val methodBefore = _calculationMethod.value
         _userLocation.value = location
+        if (location.isAutoDetected) {
+            _lastDetectedLocation.value = location
+            prefs.edit().putString("detected_city", location.cityName)
+                .putString("detected_country", location.countryName)
+                .putString("detected_lat", location.latitude.toString())
+                .putString("detected_lon", location.longitude.toString())
+                .putString("detected_tz", location.timeZoneId).commit()
+        }
         // Only persist as general default city if user has NOT set a primary location
-        if (_primaryLocation.value == null) {
+        if (_primaryLocation.value == null && location.isAutoDetected) {
             prefs.edit()
                 .putString("city_name", location.cityName)
                 .putString("country_name", location.countryName)
                 .putString("latitude", location.latitude.toString())
                 .putString("longitude", location.longitude.toString())
                 .putBoolean("is_auto_detected", location.isAutoDetected)
+                .putString("tz", location.timeZoneId)
                 .apply()
         }
 
-        if (autoAlignMethod && location.countryName.isNotBlank()) {
+        if (autoAlignMethod && (location.isAutoDetected || _primaryLocation.value == location) && location.countryName.isNotBlank()) {
             val recommendedMethod = com.example.domain.model.getRecommendedMethodForLocation(location.countryName, location.cityName)
             _calculationMethod.value = recommendedMethod
             prefs.edit().putInt("calc_method", recommendedMethod.id).apply()
         }
+        // Alarms/widgets/cache only care about the background city. Skip all of that work for a
+        // plain city preview; still refresh when nothing is saved yet (widget falls back to it).
+        val backgroundAfter = getBackgroundLocation()
+        if (backgroundAfter == null || !sameSpot(backgroundBefore, backgroundAfter) ||
+            methodBefore != _calculationMethod.value) {
+            notifyPrayerWidgets()
+        }
+    }
+
+    private fun sameCoordinates(a: UserLocation?, b: UserLocation?): Boolean {
+        if (a == null || b == null) return false
+        return kotlin.math.abs(a.latitude - b.latitude) < 1e-6 &&
+            kotlin.math.abs(a.longitude - b.longitude) < 1e-6
+    }
+
+    /** Same place AND same zone: what the schedule cache / alarm plan are keyed on. */
+    private fun sameSpot(a: UserLocation?, b: UserLocation?): Boolean {
+        if (a == null || b == null) return a == null && b == null
+        return sameCoordinates(a, b) && getZoneIdForLocation(a) == getZoneIdForLocation(b)
+    }
+
+    /** True when [location] is the city the cache, alarms and widgets are built for. */
+    fun isBackgroundLocation(location: UserLocation): Boolean =
+        sameCoordinates(location, getBackgroundLocation())
+
+    private fun notifyPrayerWidgets() {
+        try {
+            com.example.notification.PrayerNotificationManager.rescheduleAlarmsFromSavedState(context)
+
+            com.example.widget.PrayerWidgetProvider.updateAllWidgets(context)
+            com.example.widget.PrayerWidgetProvider.scheduleNextBoundaryUpdate(context)
+        } catch (_: Exception) {}
     }
 
     fun setPrimaryLocation(location: UserLocation) {
+        // New primary city: drop the previous city's cached schedule before anything reads it.
+        if (!sameSpot(getBackgroundLocation(), location)) PrayerScheduleCache.clear(context)
         _primaryLocation.value = location
+        _userLocation.value = location
         prefs.edit()
             .putBoolean("has_primary_location", true)
             .putString("primary_city_name", location.cityName)
@@ -174,15 +246,17 @@ class SettingsRepository(private val context: Context) {
             .putString("primary_latitude", location.latitude.toString())
             .putString("primary_longitude", location.longitude.toString())
             .putBoolean("primary_is_auto", location.isAutoDetected)
+            .putString("primary_tz", location.timeZoneId)
             .apply()
 
-        try {
-            com.example.notification.PrayerNotificationManager.rescheduleAlarmsFromSavedState(context)
-        } catch (_: Exception) {}
+        notifyPrayerWidgets()
     }
 
     fun clearPrimaryLocation() {
+        // Background city falls back to the last detected one (or nothing): old cache must go.
+        if (!sameSpot(getBackgroundLocation(), _lastDetectedLocation.value)) PrayerScheduleCache.clear(context)
         _primaryLocation.value = null
+        _lastDetectedLocation.value?.let { _userLocation.value = it }
         prefs.edit()
             .putBoolean("has_primary_location", false)
             .remove("primary_city_name")
@@ -190,16 +264,15 @@ class SettingsRepository(private val context: Context) {
             .remove("primary_latitude")
             .remove("primary_longitude")
             .remove("primary_is_auto")
+            .remove("primary_tz")
             .apply()
 
-        try {
-            com.example.notification.PrayerNotificationManager.rescheduleAlarmsFromSavedState(context)
-        } catch (_: Exception) {}
+        notifyPrayerWidgets()
     }
 
-    fun getNotificationLocation(): UserLocation {
-        return _primaryLocation.value ?: _userLocation.value
-    }
+    fun getBackgroundLocation(): UserLocation? = _primaryLocation.value ?: _lastDetectedLocation.value
+
+    fun getNotificationLocation(): UserLocation = getBackgroundLocation() ?: _userLocation.value
 
     fun getNotificationZoneId(): java.time.ZoneId {
         return getZoneIdForLocation(getNotificationLocation())
@@ -213,11 +286,13 @@ class SettingsRepository(private val context: Context) {
     fun set24HourFormat(enabled: Boolean) {
         _is24HourFormat.value = enabled
         prefs.edit().putBoolean("is_24_hour", enabled).apply()
+        notifyPrayerWidgets()
     }
 
     fun setHijriAdjustment(adjustment: Int) {
         _hijriAdjustment.value = adjustment
         prefs.edit().putInt("hijri_adjustment", adjustment).apply()
+        notifyPrayerWidgets()
     }
 
     fun setQuranArabicFontSize(size: Float) {
@@ -248,11 +323,13 @@ class SettingsRepository(private val context: Context) {
     fun setCalculationMethod(method: CalculationMethod) {
         _calculationMethod.value = method
         prefs.edit().putInt("calc_method", method.id).apply()
+        notifyPrayerWidgets()
     }
 
     fun setJuristicSchool(school: JuristicSchool) {
         _juristicSchool.value = school
         prefs.edit().putInt("juristic_school", school.id).apply()
+        notifyPrayerWidgets()
     }
 
     fun setPrePrayerReminder(minutes: Int) {
@@ -271,6 +348,16 @@ class SettingsRepository(private val context: Context) {
         current[prayer] = enabled
         _prayerNotifications.value = current
         prefs.edit().putBoolean("notif_${prayer.name}", enabled).apply()
+        com.example.notification.PrayerNotificationManager.rescheduleAlarmsFromSavedState(context)
+    }
+
+    fun setPrayerAlertType(type: PrayerAlertType) {
+        _prayerAlertType.value = type
+        prefs.edit().putString("prayer_alert_type", type.id).apply()
+    }
+
+    fun getPrayerAlertType(): PrayerAlertType {
+        return _prayerAlertType.value
     }
 
     fun getLocationZoneId(): java.time.ZoneId {
@@ -278,16 +365,27 @@ class SettingsRepository(private val context: Context) {
     }
 
     fun getZoneIdForLocation(loc: UserLocation): java.time.ZoneId {
+        // Exact IANA zone saved with the location (GPS fix / city search result) always wins.
+        val explicitZone = loc.timeZoneId?.takeIf { it.isNotBlank() }
+            ?.let { runCatching { java.time.ZoneId.of(it) }.getOrNull() }
+        if (explicitZone != null) return explicitZone
+
         val country = loc.countryName.lowercase().trim()
         val city = loc.cityName.lowercase().trim()
+        // Whole-word country tokens, so "Romania" is not matched by "oman" nor "Ukraine" by "uk".
+        val countryWords = country.split(Regex("[^a-z]+")).filter { it.isNotEmpty() }
 
         val zoneName = when {
+            city.contains("los angeles") || city.contains("san francisco") -> "America/Los_Angeles"
+            city.contains("chicago") || city.contains("houston") || city.contains("dallas") -> "America/Chicago"
+            city.contains("vancouver") -> "America/Vancouver"
+            city.contains("perth") -> "Australia/Perth"
             country.contains("pakistan") || city.contains("karachi") || city.contains("lahore") || city.contains("islamabad") || city.contains("rawalpindi") || city.contains("peshawar") || city.contains("quetta") -> "Asia/Karachi"
             country.contains("saudi") || city.contains("makkah") || city.contains("mecca") || city.contains("madinah") || city.contains("medina") || city.contains("riyadh") || city.contains("jeddah") -> "Asia/Riyadh"
             country.contains("emirates") || country.contains("uae") || city.contains("dubai") || city.contains("abu dhabi") || city.contains("sharjah") -> "Asia/Dubai"
             country.contains("qatar") || city.contains("doha") -> "Asia/Qatar"
             country.contains("kuwait") -> "Asia/Kuwait"
-            country.contains("oman") || city.contains("muscat") -> "Asia/Muscat"
+            "oman" in countryWords || city.contains("muscat") -> "Asia/Muscat"
             country.contains("bahrain") || city.contains("manama") -> "Asia/Bahrain"
             country.contains("jordan") || city.contains("amman") -> "Asia/Amman"
             country.contains("lebanon") || city.contains("beirut") -> "Asia/Beirut"
@@ -304,7 +402,7 @@ class SettingsRepository(private val context: Context) {
             country.contains("indonesia") || city.contains("jakarta") -> "Asia/Jakarta"
             country.contains("malaysia") || city.contains("kuala lumpur") -> "Asia/Kuala_Lumpur"
             country.contains("singapore") -> "Asia/Singapore"
-            country.contains("united kingdom") || country.contains("uk") || city.contains("london") || city.contains("birmingham") || city.contains("manchester") -> "Europe/London"
+            country.contains("united kingdom") || "uk" in countryWords || city.contains("london") || city.contains("birmingham") || city.contains("manchester") -> "Europe/London"
             country.contains("germany") || city.contains("berlin") || city.contains("frankfurt") || city.contains("munich") -> "Europe/Berlin"
             country.contains("france") || city.contains("paris") -> "Europe/Paris"
             country.contains("spain") || city.contains("madrid") || city.contains("barcelona") -> "Europe/Madrid"
@@ -388,63 +486,85 @@ class SettingsRepository(private val context: Context) {
                 ?: locationManager.getLastKnownLocation(LocationManager.NETWORK_PROVIDER)
                 ?: locationManager.getLastKnownLocation(LocationManager.PASSIVE_PROVIDER)
 
+            val provider = if (isGpsEnabled) LocationManager.GPS_PROVIDER else LocationManager.NETWORK_PROVIDER
             if (loc != null) {
                 applyLocationFromCoordinates(appContext, loc.latitude, loc.longitude)
+                // A cached fix can be hours/days old (e.g. after travelling): ask for a fresh one too.
+                if (System.currentTimeMillis() - loc.time > STALE_FIX_MS) {
+                    requestFreshFix(appContext, locationManager, provider)
+                }
                 return true
             } else {
-                // If last known is null, request a single fresh fix
-                val provider = if (isGpsEnabled) LocationManager.GPS_PROVIDER else LocationManager.NETWORK_PROVIDER
-                val listener = object : android.location.LocationListener {
-                    override fun onLocationChanged(freshLoc: android.location.Location) {
-                        applyLocationFromCoordinates(appContext, freshLoc.latitude, freshLoc.longitude)
-                        try { locationManager.removeUpdates(this) } catch (_: Exception) {}
-                    }
-                    override fun onProviderDisabled(provider: String) {}
-                    override fun onProviderEnabled(provider: String) {}
-                    override fun onStatusChanged(provider: String?, status: Int, extras: android.os.Bundle?) {}
-                }
-                try {
-                    locationManager.requestSingleUpdate(provider, listener, android.os.Looper.getMainLooper())
-                } catch (_: Exception) {
-                    locationManager.requestLocationUpdates(provider, 0L, 0f, listener, android.os.Looper.getMainLooper())
-                }
+                requestFreshFix(appContext, locationManager, provider)
                 return true
             }
         } catch (_: Exception) {}
         return false
     }
 
-    private fun applyLocationFromCoordinates(appContext: Context, lat: Double, lng: Double) {
-        var cityName = "Current Location"
-        var countryName = ""
-        try {
-            val geocoder = Geocoder(appContext, Locale.getDefault())
-            val addresses = geocoder.getFromLocation(lat, lng, 1)
-            if (!addresses.isNullOrEmpty()) {
-                cityName = addresses[0].locality ?: addresses[0].subAdminArea ?: addresses[0].adminArea ?: "My Location"
-                countryName = addresses[0].countryName ?: ""
+    private fun requestFreshFix(appContext: Context, locationManager: LocationManager, provider: String) {
+        val listener = object : android.location.LocationListener {
+            override fun onLocationChanged(freshLoc: android.location.Location) {
+                applyLocationFromCoordinates(appContext, freshLoc.latitude, freshLoc.longitude)
+                try { locationManager.removeUpdates(this) } catch (_: Exception) {}
             }
-        } catch (_: Exception) {}
+            override fun onProviderDisabled(provider: String) {}
+            override fun onProviderEnabled(provider: String) {}
+            override fun onStatusChanged(provider: String?, status: Int, extras: android.os.Bundle?) {}
+        }
+        try {
+            locationManager.requestSingleUpdate(provider, listener, android.os.Looper.getMainLooper())
+        } catch (_: Exception) {
+            try {
+                locationManager.requestLocationUpdates(provider, 0L, 0f, listener, android.os.Looper.getMainLooper())
+            } catch (_: Exception) {}
+        }
+    }
 
-        val detected = UserLocation(
-            cityName = cityName,
-            countryName = countryName,
-            latitude = lat,
-            longitude = lng,
-            isAutoDetected = true
-        )
-        updateLocation(detected)
+    private fun applyLocationFromCoordinates(appContext: Context, lat: Double, lng: Double) {
+        // The device zone is the right zone for a GPS fix taken where the user physically is.
+        val zoneId = java.time.ZoneId.systemDefault().id
+        // Geocoder does blocking I/O: keep it off the main thread.
+        kotlin.concurrent.thread(name = "geocode-location") {
+            var cityName = "Current Location"
+            var countryName = ""
+            try {
+                val geocoder = Geocoder(appContext, Locale.getDefault())
+                val addresses = geocoder.getFromLocation(lat, lng, 1)
+                if (!addresses.isNullOrEmpty()) {
+                    cityName = addresses[0].locality ?: addresses[0].subAdminArea ?: addresses[0].adminArea ?: "My Location"
+                    countryName = addresses[0].countryName ?: ""
+                }
+            } catch (_: Exception) {}
+            // Offline / geocoder failure: keep the known name when we have not moved far.
+            val previous = _lastDetectedLocation.value
+            if (countryName.isBlank() && previous != null && previous.countryName.isNotBlank() &&
+                kotlin.math.abs(previous.latitude - lat) < 0.05 && kotlin.math.abs(previous.longitude - lng) < 0.05) {
+                cityName = previous.cityName
+                countryName = previous.countryName
+            }
+            updateLocation(
+                UserLocation(
+                    cityName = cityName,
+                    countryName = countryName,
+                    latitude = lat,
+                    longitude = lng,
+                    isAutoDetected = true,
+                    timeZoneId = zoneId
+                )
+            )
+        }
     }
 
     companion object {
+        private const val STALE_FIX_MS = 15 * 60 * 1000L
+
         @Volatile
         private var INSTANCE: SettingsRepository? = null
 
         fun getInstance(context: Context): SettingsRepository {
             return INSTANCE ?: synchronized(this) {
-                val instance = SettingsRepository(context.applicationContext)
-                INSTANCE = instance
-                instance
+                INSTANCE ?: SettingsRepository(context.applicationContext).also { INSTANCE = it }
             }
         }
     }

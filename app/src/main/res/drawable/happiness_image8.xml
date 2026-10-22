@@ -1,0 +1,59 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="600dp"
+    android:height="800dp"
+    android:viewportWidth="600"
+    android:viewportHeight="800">
+
+    <!-- Warm Amber & Charcoal Gradient Background -->
+    <path
+        android:pathData="M0,0 L600,0 L600,800 L0,800 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:angle="270"
+                android:startColor="#1A140B"
+                android:centerColor="#261E10"
+                android:endColor="#0F0C07"
+                android:type="linear" />
+        </aapt:attr>
+    </path>
+
+    <!-- Warm Mihrab Glowing Center -->
+    <path
+        android:pathData="M100,100 a200,200 0 1,0 400,0 a200,200 0 1,0 -400,0">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:gradientRadius="300"
+                android:centerX="300"
+                android:centerY="420"
+                android:startColor="#33E6A123"
+                android:endColor="#00000000"
+                android:type="radial" />
+        </aapt:attr>
+    </path>
+
+    <!-- Mihrab Horseshoe Arch Frame -->
+    <path
+        android:pathData="M80,750 L80,380 C80,240 180,120 300,80 C420,120 520,240 520,380 L520,750"
+        android:strokeWidth="3.5"
+        android:fillColor="#00000000"
+        android:strokeColor="#E6A123" />
+
+    <path
+        android:pathData="M100,750 L100,390 C100,260 190,150 300,110 C410,150 500,260 500,390 L500,750"
+        android:strokeWidth="1.5"
+        android:fillColor="#00000000"
+        android:strokeColor="#80E6A123" />
+
+    <!-- Hanging Lantern at Arch Top Center -->
+    <path
+        android:pathData="M300,80 L300,180"
+        android:strokeWidth="2"
+        android:strokeColor="#E6A123" />
+    <path
+        android:pathData="M285,180 L315,180 L322,230 L300,250 L278,230 Z"
+        android:fillColor="#E6A123" />
+    <path
+        android:pathData="M290,195 L310,195 L314,225 L300,238 L286,225 Z"
+        android:fillColor="#FFF4D0" />
+</vector>

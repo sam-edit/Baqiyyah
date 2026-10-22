@@ -135,11 +135,19 @@ class QuranAudioDownloadManager(private val context: Context) {
         val targetFile = File(audioDir, "surah_${surahNumber}_${reciter.id}.mp3")
 
         try {
-            val url = reciter.getAudioUrl(surahNumber)
-            val request = Request.Builder().url(url).build()
-            val response = NetworkModule.okHttpClient.newCall(request).execute()
+            val primaryUrl = reciter.getAudioUrl(surahNumber)
+            var response = NetworkModule.okHttpClient.newCall(Request.Builder().url(primaryUrl).build()).execute()
 
             if (!response.isSuccessful) {
+                response.close()
+                val fallbackUrl = reciter.getFallbackAudioUrl(surahNumber)
+                if (fallbackUrl != null) {
+                    response = NetworkModule.okHttpClient.newCall(Request.Builder().url(fallbackUrl).build()).execute()
+                }
+            }
+
+            if (!response.isSuccessful) {
+                response.close()
                 tempFile.delete()
                 _downloadingKeys.value = _downloadingKeys.value - key
                 _downloadProgressMap.value = _downloadProgressMap.value - key

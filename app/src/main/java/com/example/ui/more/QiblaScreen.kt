@@ -14,6 +14,7 @@ import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -303,6 +304,18 @@ fun QiblaScreen(
         label = "compass_glow"
     )
 
+    val bannerBgColor by animateColorAsState(
+        targetValue = if (isFacingQibla) GoldAccent else if (!isDeviceFlat) MaterialTheme.colorScheme.surfaceVariant else EmeraldPrimary.copy(alpha = 0.12f),
+        animationSpec = tween(300),
+        label = "qibla_banner_bg"
+    )
+
+    val bannerBorderColor by animateColorAsState(
+        targetValue = if (isFacingQibla) GoldAccent else MintBorder,
+        animationSpec = tween(300),
+        label = "qibla_banner_border"
+    )
+
     val cardinalDirection = remember(qiblaBearing) {
         when (qiblaBearing) {
             in 0.0..22.5 -> "N"
@@ -443,11 +456,11 @@ fun QiblaScreen(
 
             Spacer(modifier = Modifier.height(10.dp))
 
-            // 2. Real-time Direction Guidance Banner
+            // 2. Real-time Direction Guidance Banner with smooth color transitions
             Surface(
                 shape = AlDeenTokens.ShapePill,
-                color = if (isFacingQibla) GoldAccent else if (!isDeviceFlat) MaterialTheme.colorScheme.surfaceVariant else EmeraldPrimary.copy(alpha = 0.12f),
-                border = BorderStroke(1.dp, if (isFacingQibla) GoldAccent else MintBorder),
+                color = bannerBgColor,
+                border = BorderStroke(1.dp, bannerBorderColor),
                 modifier = Modifier.padding(vertical = 2.dp)
             ) {
                 Row(
@@ -495,6 +508,13 @@ fun QiblaScreen(
                         shadowElevation = if (isFacingQibla) 18.dp.toPx() else 10.dp.toPx()
                     }
                     .shadow(elevation = 12.dp, shape = CircleShape)
+                    .border(
+                        BorderStroke(
+                            width = if (isFacingQibla) 2.5.dp else 1.dp,
+                            color = animatedGlowColor.copy(alpha = if (isFacingQibla) 0.85f else 0.3f)
+                        ),
+                        shape = CircleShape
+                    )
                     .clip(CircleShape)
                     .background(
                         Brush.radialGradient(

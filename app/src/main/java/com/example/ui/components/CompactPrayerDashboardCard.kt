@@ -69,6 +69,7 @@ fun CompactPrayerDashboardCard(
                                 .size(6.dp)
                                 .clip(CircleShape)
                                 .background(GoldAccent)
+                                .pulseEffect()
                         )
                         Spacer(modifier = Modifier.width(5.dp))
                         Text(

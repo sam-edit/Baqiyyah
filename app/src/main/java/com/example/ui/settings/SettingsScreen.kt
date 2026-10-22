@@ -1,11 +1,14 @@
 package com.example.ui.settings
 
+import androidx.compose.animation.*
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -15,26 +18,31 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.repository.SettingsRepository
 import com.example.domain.model.CalculationMethod
+import com.example.domain.model.PrayerAlertType
 import com.example.domain.model.PrayerType
 import com.example.notification.PrayerNotificationManager
 import com.example.ui.components.AlDeenText
 import com.example.ui.components.CityPickerDialog
 import com.example.ui.theme.*
+import kotlinx.coroutines.delay
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
     settingsRepository: SettingsRepository,
     onBack: () -> Unit,
+    highlightCalcMethod: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -49,11 +57,27 @@ fun SettingsScreen(
     val prePrayerMin by settingsRepository.prePrayerReminderMin.collectAsStateWithLifecycle()
     val isQuietMode by settingsRepository.isQuietMode.collectAsStateWithLifecycle()
     val notifMap by settingsRepository.prayerNotifications.collectAsStateWithLifecycle()
+    val prayerAlertType by settingsRepository.prayerAlertType.collectAsStateWithLifecycle()
 
     var showCityPicker by remember { mutableStateOf(false) }
     var showCalcMethodDialog by remember { mutableStateOf(false) }
+    // Red highlight shown only when arriving from Home's "Tap to change"; cleared once tapped
+    var calcMethodHighlighted by remember { mutableStateOf(highlightCalcMethod) }
     var showGpsPromptDialog by remember { mutableStateOf(false) }
     var showMorePrayers by remember { mutableStateOf(false) }
+    var showTestCountdownDialog by remember { mutableStateOf(false) }
+    var testCountdownSeconds by remember { mutableIntStateOf(3) }
+
+    LaunchedEffect(showTestCountdownDialog) {
+        if (showTestCountdownDialog) {
+            testCountdownSeconds = 3
+            while (testCountdownSeconds > 0) {
+                delay(1000L)
+                testCountdownSeconds--
+            }
+            showTestCountdownDialog = false
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -152,7 +176,7 @@ fun SettingsScreen(
                             )
                             Spacer(modifier = Modifier.width(6.dp))
                             AlDeenText(
-                                text = "Use Current Location (موجودہ لوکیشن حاصل کریں)",
+                                text = "Use Current Location (موجودہ لوکیشن استعمال کریں)",
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 13.sp
                             )
@@ -171,11 +195,16 @@ fun SettingsScreen(
                         // Calculation Method Selector Button / List Opener
                         Surface(
                             shape = RoundedCornerShape(10.dp),
-                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
-                            border = BorderStroke(1.dp, MintBorder),
+                            color = if (calcMethodHighlighted) Color(0xFFE53935).copy(alpha = 0.12f)
+                                else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                            border = if (calcMethodHighlighted) BorderStroke(2.dp, Color(0xFFE53935))
+                                else BorderStroke(1.dp, MintBorder),
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clickable { showCalcMethodDialog = true }
+                                .clickable {
+                                    calcMethodHighlighted = false
+                                    showCalcMethodDialog = true
+                                }
                                 .testTag("calculation_method_selector")
                         ) {
                             Row(
@@ -410,6 +439,105 @@ fun SettingsScreen(
 
                         HorizontalDivider(modifier = Modifier.padding(vertical = 10.dp), color = MintBorder.copy(alpha = 0.5f))
 
+                        // Alert Type Selection: Light, Medium, Strong
+                        Column(modifier = Modifier.fillMaxWidth()) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column {
+                                    AlDeenText(
+                                        text = "Alert Type (الرٹ کی قسم)",
+                                        style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Bold)
+                                    )
+                                    Text(
+                                        text = "Choose notification & screen alert experience",
+                                        style = MaterialTheme.typography.bodySmall.copy(color = TextSecondary)
+                                    )
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(10.dp))
+
+                            // 3 Options
+                            val alertOptions = listOf(
+                                Triple(
+                                    PrayerAlertType.LIGHT,
+                                    "Light (لائٹ)",
+                                    "Standard system notification in drawer • معمول کی نوٹیفکیشن"
+                                ),
+                                Triple(
+                                    PrayerAlertType.MEDIUM,
+                                    "Medium (میڈیم)",
+                                    "Full screen alert (5s) with vibration & 1s delayed audio • ۵ سیکنڈ فل اسکرین"
+                                ),
+                                Triple(
+                                    PrayerAlertType.STRONG,
+                                    "Strong (اسٹرانگ)",
+                                    "Full screen alert (10s) with active vibration & 1s delayed audio • ۱۰ سیکنڈ فل اسکرین"
+                                )
+                            )
+
+                            Column(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                alertOptions.forEach { (type, title, desc) ->
+                                    val isSelected = prayerAlertType == type
+                                    Surface(
+                                        shape = RoundedCornerShape(12.dp),
+                                        color = if (isSelected) EmeraldContainer.copy(alpha = 0.55f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+                                        border = BorderStroke(
+                                            width = if (isSelected) 1.5.dp else 1.dp,
+                                            color = if (isSelected) EmeraldPrimary else MintBorder
+                                        ),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable { settingsRepository.setPrayerAlertType(type) }
+                                            .testTag("alert_type_option_${type.id}")
+                                    ) {
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(horizontal = 14.dp, vertical = 10.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            RadioButton(
+                                                selected = isSelected,
+                                                onClick = { settingsRepository.setPrayerAlertType(type) },
+                                                colors = RadioButtonDefaults.colors(
+                                                    selectedColor = EmeraldPrimary,
+                                                    unselectedColor = TextTertiary
+                                                )
+                                            )
+                                            Spacer(modifier = Modifier.width(8.dp))
+                                            Column {
+                                                Text(
+                                                    text = title,
+                                                    style = MaterialTheme.typography.bodyMedium.copy(
+                                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.SemiBold,
+                                                        color = if (isSelected) EmeraldPrimary else TextPrimary,
+                                                        fontSize = 14.sp
+                                                    )
+                                                )
+                                                Spacer(modifier = Modifier.height(2.dp))
+                                                Text(
+                                                    text = desc,
+                                                    style = MaterialTheme.typography.bodySmall.copy(
+                                                        color = TextSecondary,
+                                                        fontSize = 11.5.sp
+                                                    )
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp), color = MintBorder.copy(alpha = 0.5f))
+
                         // Per-Prayer Toggles
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -538,10 +666,12 @@ fun SettingsScreen(
                         HorizontalDivider(color = MintBorder.copy(alpha = 0.5f), thickness = 0.8.dp)
                         Spacer(modifier = Modifier.height(12.dp))
 
-                        // Test Notification Button
+                        // Test Notification Button with 3s live countdown popup
                         OutlinedButton(
                             onClick = {
-                                PrayerNotificationManager.showTestNotification(context)
+                                testCountdownSeconds = 3
+                                showTestCountdownDialog = true
+                                PrayerNotificationManager.scheduleTestNotificationAlarm(context, delaySeconds = 3)
                             },
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -720,6 +850,115 @@ fun SettingsScreen(
             dismissButton = {
                 TextButton(onClick = { showGpsPromptDialog = false }) {
                     Text("Cancel", color = TextSecondary)
+                }
+            },
+            shape = AlDeenTokens.ShapeCard,
+            containerColor = MaterialTheme.colorScheme.surface
+        )
+    }
+
+    // 3-Second Test Notification Countdown Popup (3.. 2.. 1)
+    if (showTestCountdownDialog) {
+        AlertDialog(
+            onDismissRequest = {
+                PrayerNotificationManager.cancelTestNotificationAlarm(context)
+                showTestCountdownDialog = false
+            },
+            icon = {
+                Box(
+                    modifier = Modifier
+                        .size(72.dp)
+                        .clip(CircleShape)
+                        .background(EmeraldContainer)
+                        .pulseEffect(minScale = 0.92f, maxScale = 1.08f),
+                    contentAlignment = Alignment.Center
+                ) {
+                    AnimatedContent(
+                        targetState = testCountdownSeconds,
+                        transitionSpec = {
+                            (fadeIn(tween(180)) + scaleIn(tween(180))).togetherWith(fadeOut(tween(140)) + scaleOut(tween(140)))
+                        },
+                        label = "countdown_num"
+                    ) { seconds ->
+                        Text(
+                            text = "$seconds",
+                            style = MaterialTheme.typography.headlineLarge.copy(
+                                fontWeight = FontWeight.ExtraBold,
+                                color = EmeraldPrimary,
+                                fontSize = 34.sp
+                            )
+                        )
+                    }
+                }
+            },
+            title = {
+                Text(
+                    text = "Sending Test Alert in ${testCountdownSeconds}s",
+                    style = MaterialTheme.typography.titleMedium.copy(
+                        fontWeight = FontWeight.Bold,
+                        textAlign = TextAlign.Center
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                )
+            },
+            text = {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    AlDeenText(
+                        text = "ٹیسٹ الرٹ ${testCountdownSeconds} سیکنڈ میں بھیجا جا رہا ہے...",
+                        style = MaterialTheme.typography.bodyMedium.copy(
+                            fontWeight = FontWeight.Bold,
+                            color = EmeraldPrimary,
+                            textAlign = TextAlign.Center
+                        )
+                    )
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.65f),
+                        border = BorderStroke(1.dp, MintBorder),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Lock,
+                                contentDescription = null,
+                                tint = EmeraldPrimary,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(10.dp))
+                            AlDeenText(
+                                text = "Tip: You can lock your phone screen or exit the app right now to verify that the full-screen alert turns on the screen even when locked/closed!\n(مشورہ: آپ ابھی فون کی اسکرین لاک کر کے چیک کر سکتے ہیں کہ اسکرین آن ہو کر فل اسکرین الرٹ کھلتی ہے)",
+                                style = MaterialTheme.typography.bodySmall.copy(
+                                    fontSize = 11.5.sp,
+                                    color = TextSecondary
+                                )
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                OutlinedButton(
+                    onClick = {
+                        PrayerNotificationManager.cancelTestNotificationAlarm(context)
+                        showTestCountdownDialog = false
+                    },
+                    shape = AlDeenTokens.ShapePill,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = "Cancel (منسوخ کریں)",
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.error
+                    )
                 }
             },
             shape = AlDeenTokens.ShapeCard,

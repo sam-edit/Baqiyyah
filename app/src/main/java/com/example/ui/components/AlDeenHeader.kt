@@ -18,10 +18,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.domain.model.UserLocation
-import com.example.ui.theme.AlDeenTokens
-import com.example.ui.theme.EmeraldPrimary
-import com.example.ui.theme.MintBorder
-import com.example.ui.theme.TextPrimary
+import com.example.ui.theme.*
 
 @Composable
 fun AlDeenHeader(
@@ -30,6 +27,7 @@ fun AlDeenHeader(
     onLocationClick: () -> Unit,
     title: String = "Baqiyyah",
     subtitle: String? = null,
+    isMenuOpen: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     Row(
@@ -44,19 +42,12 @@ fun AlDeenHeader(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier.testTag("app_header_left")
         ) {
-            IconButton(
+            AnimatedMorphMenuIcon(
+                isOpen = isMenuOpen,
                 onClick = onMenuClick,
-                modifier = Modifier
-                    .size(AlDeenTokens.TouchTargetMin)
-                    .testTag("drawer_menu_button")
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Menu,
-                    contentDescription = "Open Navigation Menu",
-                    tint = EmeraldPrimary,
-                    modifier = Modifier.size(AlDeenTokens.IconSizeMedium)
-                )
-            }
+                tint = EmeraldPrimary,
+                modifier = Modifier.testTag("drawer_menu_button")
+            )
 
             Spacer(modifier = Modifier.width(AlDeenTokens.SpacingSmall))
 
@@ -85,6 +76,7 @@ fun AlDeenHeader(
         Surface(
             modifier = Modifier
                 .clip(AlDeenTokens.ShapePill)
+                .pressScaleEffect(0.96f)
                 .clickable { onLocationClick() }
                 .testTag("location_selector_pill"),
             color = MaterialTheme.colorScheme.surfaceVariant,

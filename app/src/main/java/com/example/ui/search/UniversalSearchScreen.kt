@@ -84,7 +84,7 @@ fun UniversalSearchScreen(
     val translationManager = remember { QuranTranslationManager.getInstance(context) }
     val database = remember { com.example.data.local.AlDeenDatabase.getInstance(context) }
     val bookmarksRepo = remember { BookmarksRepository(database.bookmarkDao()) }
-    val audioPlayer = remember { QuranAudioPlayer(context) }
+    val audioPlayer = remember { QuranAudioPlayer.getInstance(context) }
 
     val audioState by audioPlayer.playbackState.collectAsStateWithLifecycle()
     val downloadedQuranLanguages by translationManager.downloadedLanguageCodes.collectAsStateWithLifecycle()
@@ -101,6 +101,7 @@ fun UniversalSearchScreen(
     var showQuranSearchByDropdown by remember { mutableStateOf(false) }
     var showQuranLanguageDropdown by remember { mutableStateOf(false) }
     var isQuranSearching by remember { mutableStateOf(false) }
+    var quranSearchProgress by remember { mutableIntStateOf(0) }
     var quranResults by remember { mutableStateOf<List<Pair<Surah, Ayah>>>(emptyList()) }
     var quranSearchJob by remember { mutableStateOf<Job?>(null) }
 
@@ -127,23 +128,55 @@ fun UniversalSearchScreen(
         if (query.isBlank()) {
             quranResults = emptyList()
             isQuranSearching = false
+            quranSearchProgress = 0
             return
         }
 
         isQuranSearching = true
+        quranSearchProgress = 10
         quranSearchJob = coroutineScope.launch {
             delay(150)
-            val results = withContext(Dispatchers.IO) {
-                quranRepo.searchAyahsOffline(
-                    context = context,
-                    query = query,
-                    searchByAyah = (quranMode == QuranSearchMode.BY_AYAH),
-                    langCode = quranLanguage.code,
-                    translationManager = translationManager
-                )
+            val trimmed = query.trim()
+            if (quranMode == QuranSearchMode.BY_AYAH) {
+                // By Number: Fast direct search, no streaming batching
+                val results = withContext(Dispatchers.IO) {
+                    quranRepo.searchAyahsOffline(
+                        context = context,
+                        query = trimmed,
+                        searchByAyah = true,
+                        langCode = quranLanguage.code,
+                        translationManager = translationManager
+                    )
+                }
+                quranResults = results
+                quranSearchProgress = 100
+                isQuranSearching = false
+            } else {
+                // Word search: Stream matches progressively (1st match, then every 5 matches)
+                quranResults = emptyList()
+                try {
+                    quranRepo.searchAyahsOfflineFlow(
+                        context = context,
+                        query = trimmed,
+                        langCode = quranLanguage.code,
+                        translationManager = translationManager
+                    ).collect { batch ->
+                        quranResults = batch.results
+                        quranSearchProgress = batch.progress
+                        if (batch.isComplete) {
+                            isQuranSearching = false
+                        }
+                    }
+                    quranSearchProgress = 100
+                    isQuranSearching = false
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
+                } catch (_: Exception) {
+                    quranResults = emptyList()
+                    quranSearchProgress = 100
+                    isQuranSearching = false
+                }
             }
-            quranResults = results
-            isQuranSearching = false
         }
     }
 
@@ -167,7 +200,9 @@ fun UniversalSearchScreen(
                 navigationIcon = {
                     IconButton(
                         onClick = onBack,
-                        modifier = Modifier.testTag("search_back_button")
+                        modifier = Modifier
+                            .pressScaleEffect(0.9f)
+                            .testTag("search_back_button")
                     ) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
@@ -202,13 +237,25 @@ fun UniversalSearchScreen(
                 horizontalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 val isQuran = selectedSection == SearchSection.QURAN
+                val quranBgColor by animateColorAsState(
+                    targetValue = if (isQuran) EmeraldPrimary else Color.Transparent,
+                    animationSpec = androidx.compose.animation.core.tween(220, easing = androidx.compose.animation.core.FastOutSlowInEasing),
+                    label = "search_quran_tab_bg"
+                )
+                val quranContentColor by animateColorAsState(
+                    targetValue = if (isQuran) Color.White else TextSecondary,
+                    animationSpec = androidx.compose.animation.core.tween(220, easing = androidx.compose.animation.core.FastOutSlowInEasing),
+                    label = "search_quran_tab_content"
+                )
+
                 Surface(
                     modifier = Modifier
                         .weight(1f)
                         .clip(AlDeenTokens.ShapePill)
+                        .pressScaleEffect(0.96f)
                         .clickable { selectedSection = SearchSection.QURAN }
                         .testTag("search_section_quran"),
-                    color = if (isQuran) EmeraldPrimary else Color.Transparent,
+                    color = quranBgColor,
                     shape = AlDeenTokens.ShapePill
                 ) {
                     Row(
@@ -219,28 +266,40 @@ fun UniversalSearchScreen(
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.MenuBook,
                             contentDescription = null,
-                            tint = if (isQuran) Color.White else TextSecondary,
-                            modifier = Modifier.size(17.dp)
+                            tint = quranContentColor,
+                            modifier = Modifier.size(18.dp)
                         )
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
                             text = "Holy Quran",
                             style = MaterialTheme.typography.labelLarge.copy(
                                 fontWeight = FontWeight.Bold,
-                                color = if (isQuran) Color.White else TextSecondary
+                                color = quranContentColor
                             )
                         )
                     }
                 }
 
                 val isHadith = selectedSection == SearchSection.HADITH
+                val hadithBgColor by animateColorAsState(
+                    targetValue = if (isHadith) EmeraldPrimary else Color.Transparent,
+                    animationSpec = androidx.compose.animation.core.tween(220, easing = androidx.compose.animation.core.FastOutSlowInEasing),
+                    label = "search_hadith_tab_bg"
+                )
+                val hadithContentColor by animateColorAsState(
+                    targetValue = if (isHadith) Color.White else TextSecondary,
+                    animationSpec = androidx.compose.animation.core.tween(220, easing = androidx.compose.animation.core.FastOutSlowInEasing),
+                    label = "search_hadith_tab_content"
+                )
+
                 Surface(
                     modifier = Modifier
                         .weight(1f)
                         .clip(AlDeenTokens.ShapePill)
+                        .pressScaleEffect(0.96f)
                         .clickable { selectedSection = SearchSection.HADITH }
                         .testTag("search_section_hadith"),
-                    color = if (isHadith) EmeraldPrimary else Color.Transparent,
+                    color = hadithBgColor,
                     shape = AlDeenTokens.ShapePill
                 ) {
                     Row(
@@ -251,7 +310,7 @@ fun UniversalSearchScreen(
                         Icon(
                             imageVector = Icons.Default.LibraryBooks,
                             contentDescription = null,
-                            tint = if (isHadith) Color.White else TextSecondary,
+                            tint = hadithContentColor,
                             modifier = Modifier.size(17.dp)
                         )
                         Spacer(modifier = Modifier.width(6.dp))
@@ -259,7 +318,7 @@ fun UniversalSearchScreen(
                             text = "Hadith",
                             style = MaterialTheme.typography.labelLarge.copy(
                                 fontWeight = FontWeight.Bold,
-                                color = if (isHadith) Color.White else TextSecondary
+                                color = hadithContentColor
                             )
                         )
                     }
@@ -527,6 +586,7 @@ fun UniversalSearchScreen(
                 ) {
                     Text(
                         text = if (quranSearchQuery.isBlank()) "Offline Quran (All 114 Surahs & 6,236 Ayahs)"
+                        else if (isQuranSearching) "Searching across Holy Quran... Found ${quranResults.size} Ayahs"
                         else "Results: ${quranResults.size} Ayahs found",
                         style = MaterialTheme.typography.labelMedium.copy(
                             fontWeight = FontWeight.Bold,
@@ -557,6 +617,25 @@ fun UniversalSearchScreen(
                             textAlign = TextAlign.Center
                         )
                     }
+                } else if (isQuranSearching && quranResults.isEmpty()) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(40.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            CircularProgressIndicator(color = EmeraldPrimary)
+                            Spacer(modifier = Modifier.height(12.dp))
+                            AlDeenText(
+                                text = "Searching across Holy Quran... $quranSearchProgress%",
+                                style = MaterialTheme.typography.bodyMedium.copy(
+                                    color = TextSecondary,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            )
+                        }
+                    }
                 } else if (quranResults.isEmpty() && !isQuranSearching) {
                     Box(
                         modifier = Modifier
@@ -578,6 +657,18 @@ fun UniversalSearchScreen(
                         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
                         verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
+                        if (isQuranSearching) {
+                            item {
+                                LinearProgressIndicator(
+                                    progress = { (quranSearchProgress.coerceIn(1, 100)) / 100f },
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 4.dp),
+                                    color = EmeraldPrimary,
+                                    trackColor = MintSurface
+                                )
+                            }
+                        }
                         items(
                             items = quranResults,
                             key = { "${it.first.number}_${it.second.numberInSurah}" }

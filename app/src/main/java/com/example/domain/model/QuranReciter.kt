@@ -10,6 +10,17 @@ data class QuranReciter(
     fun getAudioUrl(surahNumber: Int): String {
         return "https://cdn.islamic.network/quran/audio-surah/$bitrate/$id/$surahNumber.mp3"
     }
+
+    fun getFallbackAudioUrl(surahNumber: Int): String? {
+        val padded = surahNumber.toString().padStart(3, '0')
+        return when (id) {
+            "ar.alafasy" -> "https://download.quranicaudio.com/quran/mishaari_raashid_al_3afaasee/$padded.mp3"
+            "ar.abdulbasitmurattal" -> "https://download.quranicaudio.com/quran/abdul_basit_murattal/$padded.mp3"
+            "ar.abdulbasitmujawwad" -> "https://download.quranicaudio.com/quran/abdulbaset_mujawwad/$padded.mp3"
+            "ar.saudalshuraim" -> "https://download.quranicaudio.com/quran/sa3ood_al-shuraym/$padded.mp3"
+            else -> "https://server8.mp3quran.net/afs/$padded.mp3"
+        }
+    }
 }
 
 val SUPPORTED_RECITERS = listOf(

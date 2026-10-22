@@ -352,6 +352,15 @@ object AlDeenTypography {
             color = Color.Unspecified
         )
 
+    val ArabicSubheading: TextStyle
+        get() = TextStyle(
+            fontFamily = AlDeenFontRegistry.ArabicFontFamily,
+            fontWeight = FontWeight.SemiBold,
+            fontSize = 16.sp,
+            lineHeight = 28.sp,
+            color = Color.Unspecified
+        )
+
     val ArabicCaption: TextStyle
         get() = TextStyle(
             fontFamily = AlDeenFontRegistry.ArabicFontFamily,

@@ -1,6 +1,10 @@
 package com.example.ui.components
 
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
@@ -33,6 +37,7 @@ fun PrayerDashboardCard(
 ) {
     val animatedProgress by animateFloatAsState(
         targetValue = prayerState.progress,
+        animationSpec = tween(durationMillis = 600, easing = FastOutSlowInEasing),
         label = "prayer_progress"
     )
 
@@ -113,22 +118,35 @@ fun PrayerDashboardCard(
                         }
                     }
 
-                    // Quiet Mode Action Control
+                    // Quiet Mode Action Control with smooth color and crossfade animation
+                    val quietBgColor by animateColorAsState(
+                        targetValue = if (prayerState.isQuietMode) Color(0xFFC0392B) else Color.White.copy(alpha = 0.2f),
+                        animationSpec = tween(durationMillis = 260, easing = FastOutSlowInEasing),
+                        label = "quiet_mode_bg"
+                    )
+
                     Surface(
                         onClick = onToggleQuietMode,
                         shape = CircleShape,
-                        color = if (prayerState.isQuietMode) Color(0xFFC0392B) else Color.White.copy(alpha = 0.2f),
+                        color = quietBgColor,
                         modifier = Modifier
                             .size(AlDeenTokens.TouchTargetMin)
+                            .pressScaleEffect(0.92f)
                             .testTag("quiet_mode_toggle")
                     ) {
                         Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                                imageVector = if (prayerState.isQuietMode) Icons.Default.NotificationsOff else Icons.Default.Notifications,
-                                contentDescription = if (prayerState.isQuietMode) "Quiet Mode Active (Muted)" else "Adhan Sound Active",
-                                tint = Color.White,
-                                modifier = Modifier.size(20.dp)
-                            )
+                            Crossfade(
+                                targetState = prayerState.isQuietMode,
+                                animationSpec = tween(durationMillis = 200),
+                                label = "quiet_icon_crossfade"
+                            ) { isQuiet ->
+                                Icon(
+                                    imageVector = if (isQuiet) Icons.Default.NotificationsOff else Icons.Default.Notifications,
+                                    contentDescription = if (isQuiet) "Quiet Mode Active (Muted)" else "Adhan Sound Active",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
                         }
                     }
                 }
@@ -207,15 +225,25 @@ fun PrayerDashboardCard(
                         horizontalAlignment = Alignment.Start,
                         modifier = Modifier.weight(1f)
                     ) {
-                        Text(
-                            text = "Now • ${prayerState.currentPrayer.displayName}",
-                            style = MaterialTheme.typography.labelSmall.copy(
-                                color = GoldAccent,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 11.5.sp
-                            ),
-                            maxLines = 1
-                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                modifier = Modifier
+                                    .size(6.5.dp)
+                                    .clip(CircleShape)
+                                    .background(GoldAccent)
+                                    .pulseEffect()
+                            )
+                            Spacer(modifier = Modifier.width(5.dp))
+                            Text(
+                                text = "Now • ${prayerState.currentPrayer.displayName}",
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    color = GoldAccent,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 11.5.sp
+                                ),
+                                maxLines = 1
+                            )
+                        }
                         Spacer(modifier = Modifier.height(2.dp))
                         Text(
                             text = formattedCurrentTime,

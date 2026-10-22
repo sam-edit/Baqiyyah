@@ -92,6 +92,9 @@ dependencies {
   implementation(libs.androidx.compose.ui.graphics)
   implementation(libs.androidx.compose.ui.tooling.preview)
   implementation(libs.androidx.core.ktx)
+  implementation(libs.androidx.media)
+  // Media3 ExoPlayer: progressive streaming (plays while downloading) + SimpleCache for the session cache
+  implementation(libs.androidx.media3.exoplayer)
   // implementation(libs.androidx.datastore.preferences)
   implementation(libs.androidx.lifecycle.runtime.compose)
   implementation(libs.androidx.lifecycle.runtime.ktx)
@@ -139,4 +142,10 @@ dependencies {
   debugImplementation(libs.androidx.compose.ui.tooling)
   "ksp"(libs.androidx.room.compiler)
   "ksp"(libs.moshi.kotlin.codegen)
+  implementation(platform(libs.firebase.bom))
+  // firebase-analytics and firebase-database are intentionally NOT used any more:
+  // ads / donate read Realtime Database through plain REST (OkHttp), and Analytics uploads
+  // data in the background. This also removes any chance of a hidden SDK connection.
+  // implementation(libs.firebase.analytics)
+  // implementation(libs.firebase.database)
 }

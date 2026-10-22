@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
@@ -52,6 +53,7 @@ fun HadithScreen(
     onLocationClick: () -> Unit,
     onBookSelected: (HadithBook) -> Unit,
     onOpenHadith: (String, Int, String) -> Unit = { _, _, _ -> },
+    isDrawerOpen: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -83,7 +85,8 @@ fun HadithScreen(
         com.example.ui.components.AlDeenHeader(
             location = location,
             onMenuClick = onOpenDrawer,
-            onLocationClick = onLocationClick
+            onLocationClick = onLocationClick,
+            isMenuOpen = isDrawerOpen
         )
 
         // Compact Prayer Dashboard & Search
@@ -131,6 +134,27 @@ fun HadithScreen(
 
             Spacer(modifier = Modifier.height(10.dp))
 
+        }
+
+        // Single scrolling body: book selector + filters + search bar now scroll together with the books / results
+        val displayedBooks = if (selectedBookFilter == null) {
+            viewModel.books
+        } else {
+            viewModel.books.filter { it.slug == selectedBookFilter?.slug }
+        }
+
+        LazyVerticalGrid(
+            columns = GridCells.Fixed(2),
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = AlDeenTokens.SpacingLarge),
+            horizontalArrangement = Arrangement.spacedBy(AlDeenTokens.SpacingMedium),
+            verticalArrangement = Arrangement.spacedBy(AlDeenTokens.SpacingMedium),
+            contentPadding = PaddingValues(vertical = AlDeenTokens.SpacingMedium)
+        ) {
+            // Book selection + filters + search bar (content unchanged, now part of the scrolling list)
+            item(key = "hadith_search_header", span = { GridItemSpan(maxLineSpan) }) {
+                Column(modifier = Modifier.fillMaxWidth()) {
             // 1. Book Selection Option (All Books + Individual Books) Above the Two Filters
             Box(
                 modifier = Modifier
@@ -772,14 +796,15 @@ fun HadithScreen(
                     .fillMaxWidth()
                     .testTag("hadith_search_field")
             )
-        }
+                }
+            }
 
-        // Body: Search Results or 2-column Book Collection Grid
-        if (searchQuery.isNotBlank()) {
-            if (isSearching && searchResults.isEmpty()) {
+            if (searchQuery.isNotBlank()) {
+                if (isSearching && searchResults.isEmpty()) {
+                    item(span = { GridItemSpan(maxLineSpan) }) {
                 Box(
                     modifier = Modifier
-                        .fillMaxSize()
+                        .fillMaxWidth()
                         .padding(40.dp),
                     contentAlignment = Alignment.Center
                 ) {
@@ -797,17 +822,10 @@ fun HadithScreen(
                         )
                     }
                 }
-            } else {
-                // Search Results List
-                LazyColumn(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(horizontal = AlDeenTokens.SpacingLarge),
-                    verticalArrangement = Arrangement.spacedBy(AlDeenTokens.SpacingMedium),
-                    contentPadding = PaddingValues(vertical = AlDeenTokens.SpacingMedium)
-                ) {
+                    }
+                } else {
                     if (isSearching) {
-                        item {
+                        item(span = { GridItemSpan(maxLineSpan) }) {
                             LinearProgressIndicator(
                                 progress = { (searchProgress.coerceIn(1, 100)) / 100f },
                                 modifier = Modifier
@@ -819,7 +837,7 @@ fun HadithScreen(
                         }
                     }
                     if (searchResults.isEmpty()) {
-                    item {
+                    item(span = { GridItemSpan(maxLineSpan) }) {
                         Card(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -856,8 +874,8 @@ fun HadithScreen(
                             }
                         }
                     }
-                } else {
-                    item {
+                    } else {
+                    item(span = { GridItemSpan(maxLineSpan) }) {
                         Text(
                             text = "Found ${searchResults.size} Ahadith in ${searchLanguage.englishName}",
                             style = MaterialTheme.typography.labelSmall.copy(
@@ -868,7 +886,7 @@ fun HadithScreen(
                         )
                     }
 
-                    items(searchResults) { hadith ->
+                    items(searchResults, span = { GridItemSpan(maxLineSpan) }) { hadith ->
                         val ref = "hadith_${hadith.bookSlug}_${hadith.hadithNumber}"
                         val isBookmarked = bookmarkedRefs.contains(ref)
                         HadithSearchResultCard(
@@ -890,21 +908,15 @@ fun HadithScreen(
                             }
                         )
                     }
+                    }
                 }
-            }
-        }
-        } else {
-            val displayedBooks = if (selectedBookFilter == null) {
-                viewModel.books
             } else {
-                viewModel.books.filter { it.slug == selectedBookFilter?.slug }
-            }
-
-            if (selectedBookFilter != null) {
+                if (selectedBookFilter != null) {
+                    item(span = { GridItemSpan(maxLineSpan) }) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = AlDeenTokens.SpacingLarge, vertical = 4.dp),
+                        .padding(vertical = 4.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -928,18 +940,8 @@ fun HadithScreen(
                         )
                     }
                 }
-            }
-
-            // Primary Books Collection in clean 2-column layout
-            LazyVerticalGrid(
-                columns = GridCells.Fixed(2),
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(horizontal = AlDeenTokens.SpacingLarge),
-                horizontalArrangement = Arrangement.spacedBy(AlDeenTokens.SpacingMedium),
-                verticalArrangement = Arrangement.spacedBy(AlDeenTokens.SpacingMedium),
-                contentPadding = PaddingValues(vertical = AlDeenTokens.SpacingMedium)
-            ) {
+                                }
+                }
                 items(displayedBooks) { book ->
                     val downloadState = downloadStatusMap[book.slug] ?: if (viewModel.isBookDownloaded(book.slug)) {
                         HadithDownloadState.Downloaded
@@ -955,12 +957,8 @@ fun HadithScreen(
                         onDownload = { viewModel.downloadBook(book.slug) },
                         onDeleteRequest = { bookToDelete = book },
                         onClick = {
-                            if (isDownloaded) {
-                                viewModel.selectBook(book)
-                                onBookSelected(book)
-                            } else {
-                                bookPromptForDownload = book
-                            }
+                            viewModel.selectBook(book)
+                            onBookSelected(book)
                         }
                     )
                 }

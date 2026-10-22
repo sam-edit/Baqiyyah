@@ -38,6 +38,8 @@ fun HadithTranslationBottomSheet(
     val selectedLangCode by viewModel.selectedLanguageCode.collectAsStateWithLifecycle()
     val currentBook by viewModel.selectedBook.collectAsStateWithLifecycle()
     val langStatusMap by viewModel.languageDownloadStatusMap.collectAsStateWithLifecycle()
+    val onlineLoadingKeys by viewModel.onlineLoadingKeys.collectAsStateWithLifecycle()
+    val onlineErrorKeys by viewModel.onlineErrorKeys.collectAsStateWithLifecycle()
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -114,7 +116,7 @@ fun HadithTranslationBottomSheet(
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
                         AlDeenText(
-                            text = "ترجمہ فعال کریں (Show Translation)",
+                            text = "Show Translation",
                             style = MaterialTheme.typography.bodyLarge.copy(
                                 fontWeight = FontWeight.Bold,
                                 color = TextPrimary
@@ -122,7 +124,7 @@ fun HadithTranslationBottomSheet(
                         )
                         Spacer(modifier = Modifier.height(2.dp))
                         AlDeenText(
-                            text = if (isTranslationEnabled) "عربی حدیث کے ساتھ ترجمہ نظر آئے گا" else "صرف عربی متن دکھایا جائے گا (ڈیفالٹ)",
+                            text = if (isTranslationEnabled) "Arabic with Translation will be shown" else "Only Arabic will be shown",
                             style = MaterialTheme.typography.bodySmall.copy(
                                 color = if (isTranslationEnabled) EmeraldPrimary else TextSecondary,
                                 fontSize = 12.5.sp
@@ -148,14 +150,14 @@ fun HadithTranslationBottomSheet(
 
             // 2. AVAILABLE LANGUAGES LIST
             AlDeenText(
-                text = "دستیاب زبانیں (Available API Languages)",
+                text = "Available Languages)",
                 style = MaterialTheme.typography.titleSmall.copy(
                     fontWeight = FontWeight.Bold,
                     color = EmeraldPrimary
                 )
             )
             AlDeenText(
-                text = "مطلوبہ زبان کا ترجمہ ڈاؤن لوڈ کر کے منتخب کریں",
+                text = "Download Languages for offline Reading",
                 style = MaterialTheme.typography.labelSmall.copy(color = TextSecondary)
             )
 
@@ -177,12 +179,15 @@ fun HadithTranslationBottomSheet(
                     }
                     val isDownloaded = state is HadithDownloadState.Downloaded
                     val isSelected = selectedLangCode == lang.code
+                    val onlineKey = "${currentBook.slug}_${viewModel.downloadManager.normalizeLang(lang.code)}"
 
                     HadithLanguageItemCard(
                         language = lang,
                         state = state,
                         isDownloaded = isDownloaded,
                         isSelected = isSelected,
+                        isLoadingOnline = onlineLoadingKeys.contains(onlineKey),
+                        hasOnlineError = onlineErrorKeys.contains(onlineKey),
                         onDownload = {
                             viewModel.downloadLanguage(currentBook.slug, lang.code)
                         },
@@ -192,8 +197,9 @@ fun HadithTranslationBottomSheet(
                         onSelect = {
                             viewModel.selectLanguage(lang.code)
                             viewModel.setTranslationEnabled(true)
+                            // Card tap = API call + show (no download). Download only via the Download button.
                             if (!isDownloaded) {
-                                viewModel.downloadLanguage(currentBook.slug, lang.code)
+                                viewModel.fetchLanguageOnline(currentBook.slug, lang.code)
                             }
                         }
                     )
@@ -209,6 +215,8 @@ private fun HadithLanguageItemCard(
     state: HadithDownloadState,
     isDownloaded: Boolean,
     isSelected: Boolean,
+    isLoadingOnline: Boolean,
+    hasOnlineError: Boolean,
     onDownload: () -> Unit,
     onDelete: () -> Unit,
     onSelect: () -> Unit,
@@ -243,8 +251,8 @@ private fun HadithLanguageItemCard(
                     // Radio button for selection
                     RadioButton(
                         selected = isSelected,
-                        onClick = if (isDownloaded) onSelect else null,
-                        enabled = isDownloaded,
+                        onClick = onSelect,
+                        enabled = true,
                         colors = RadioButtonDefaults.colors(selectedColor = EmeraldPrimary),
                         modifier = Modifier.size(36.dp)
                     )
@@ -271,7 +279,12 @@ private fun HadithLanguageItemCard(
                             )
                         }
                         AlDeenText(
-                            text = if (isDownloaded) "ڈاؤن لوڈ شدہ • مطالعہ کے لیے تیار" else "ڈاؤن لوڈ درکار ہے",
+                            text = when {
+                                isDownloaded -> "Downloaded for offline Reading"
+                                isLoadingOnline -> "Loading..."
+                                hasOnlineError && isSelected -> "Could not load. Check internet"
+                                else -> "Download for offline Reading"
+                            },
                             style = MaterialTheme.typography.labelSmall.copy(
                                 color = if (isDownloaded) EmeraldPrimary else TextTertiary,
                                 fontSize = 11.sp
@@ -368,7 +381,7 @@ private fun HadithLanguageItemCard(
                             )
                             Spacer(modifier = Modifier.width(4.dp))
                             AlDeenText(
-                                text = "ڈاؤن لوڈ",
+                                text = "Download",
                                 style = MaterialTheme.typography.labelSmall.copy(
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 11.sp

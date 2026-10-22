@@ -70,7 +70,7 @@ private fun SpecialSubCard(
     modifier: Modifier = Modifier
 ) {
     Card(
-        modifier = modifier,
+        modifier = modifier.pressScaleEffect(0.96f),
         shape = AlDeenTokens.ShapeSmallCard,
         colors = CardDefaults.cardColors(containerColor = backgroundColor),
         elevation = CardDefaults.cardElevation(defaultElevation = AlDeenTokens.ElevationLow),

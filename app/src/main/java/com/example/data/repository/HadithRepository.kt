@@ -12,6 +12,7 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
@@ -29,6 +30,52 @@ class HadithRepository(
     private val parsedBooksCache = ConcurrentHashMap<String, ParsedHadithBookData>()
     // Cache for language translations: Map<"${bookSlug}_${langCode}", Map<hadithNumber, translationText>>
     private val translationsCache = ConcurrentHashMap<String, Map<String, String>>()
+    private val bundledChaptersCache = ConcurrentHashMap<String, List<HadithChapter>>()
+
+    private fun loadBundledChapters(): Map<String, List<HadithChapter>> {
+        if (bundledChaptersCache.isNotEmpty()) return bundledChaptersCache
+        try {
+            val stream: java.io.InputStream? = try {
+                context?.assets?.open("hadith_chapters.json.gz")?.let { java.util.zip.GZIPInputStream(it) }
+            } catch (_: Exception) {
+                null
+            } ?: try {
+                context?.assets?.open("hadith_chapters.json")
+            } catch (_: Exception) {
+                null
+            }
+
+            stream?.use { input ->
+                val jsonStr = input.bufferedReader(Charsets.UTF_8).use { it.readText() }
+                val root = JSONObject(jsonStr)
+                val keys = root.keys()
+                while (keys.hasNext()) {
+                    val slug = keys.next()
+                    val arr = root.optJSONArray(slug) ?: continue
+                    val list = mutableListOf<HadithChapter>()
+                    for (i in 0 until arr.length()) {
+                        val obj = arr.getJSONObject(i)
+                        list.add(
+                            HadithChapter(
+                                id = obj.optInt("id", i + 1),
+                                bookSlug = obj.optString("bookSlug", slug),
+                                chapterNumber = obj.optInt("chapterNumber", i + 1),
+                                arabicTitle = obj.optString("arabicTitle", ""),
+                                urduTitle = obj.optString("urduTitle", ""),
+                                englishTitle = obj.optString("englishTitle", "")
+                            )
+                        )
+                    }
+                    if (list.isNotEmpty()) {
+                        bundledChaptersCache[slug] = list
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("HadithRepository", "Failed loading bundled chapters", e)
+        }
+        return bundledChaptersCache
+    }
 
     data class ParsedHadithBookData(
         val chapters: List<HadithChapter>,
@@ -536,11 +583,13 @@ class HadithRepository(
                     ?: File(hadithsDir, "${bookSlug}_english.json").takeIf { it.exists() && it.length() > 500 }
             } else null
 
-        if (langFile == null) return emptyMap()
+        // Not downloaded: use the temporary online (API) copy if it was fetched this session
+        val effectiveFile = langFile ?: downloadManager?.getOnlineLanguageFile(bookSlug, normLang)
+        if (effectiveFile == null) return emptyMap()
 
         val map = mutableMapOf<String, String>()
         try {
-            val content = langFile.readText(Charsets.UTF_8)
+            val content = effectiveFile.readText(Charsets.UTF_8)
             val root = JSONObject(content)
             val hadithsArray = root.optJSONArray("hadiths")
             if (hadithsArray != null) {
@@ -604,10 +653,14 @@ class HadithRepository(
     }
 
     fun getChaptersForBook(bookSlug: String): List<HadithChapter> {
+        val bundled = loadBundledChapters()[bookSlug]
+        if (!bundled.isNullOrEmpty()) {
+            return bundled
+        }
         val authoritative = AuthoritativeContentProvider.getChaptersForBook(bookSlug)
-        val parsed = getParsedBookData(bookSlug)
-        if (parsed != null && parsed.chapters.isNotEmpty()) {
-            return parsed.chapters.map { ch ->
+        val cached = parsedBooksCache[bookSlug]
+        if (cached != null && cached.chapters.isNotEmpty()) {
+            return cached.chapters.map { ch ->
                 val authCh = authoritative.firstOrNull { it.chapterNumber == ch.chapterNumber }
                 if (authCh != null && authCh.arabicTitle.isNotBlank()) {
                     ch.copy(
@@ -807,17 +860,199 @@ class HadithRepository(
         }
     }
 
+    /**
+     * Efficiently loads a single Hadith by its number for any book,
+     * reading from downloaded JSON files or bundled offline sources.
+     */
+    suspend fun getSingleHadith(bookSlug: String, hadithNumber: String): Hadith? = withContext(Dispatchers.IO) {
+        val trimmed = hadithNumber.trim().ifBlank { "1" }
+        val normTarget = normalizeHadithNumber(trimmed)
+        val numInt = trimmed.toIntOrNull() ?: 1
+
+        val book = getAllBooks().firstOrNull { it.slug == bookSlug }
+        val bookName = book?.englishName ?: bookSlug
+
+        // 1. First, check if built-in provider has this exact book/hadith (e.g. Nawawi, Qudsi, or sample hadiths)
+        if (bookSlug in listOf("arbaeen-nawawi", "hadith-qudsi", "nawawi", "qudsi")) {
+            val builtInList = BuiltInHadithsProvider.getHadithsForBook(bookSlug)
+            val match = builtInList.firstOrNull {
+                it.hadithNumber == trimmed || normalizeHadithNumber(it.hadithNumber) == normTarget
+            } ?: builtInList.firstOrNull()
+            if (match != null) return@withContext match
+        }
+
+        // 2. Check downloaded files on disk if available
+        val hadithsDir = downloadManager?.hadithDir
+            ?: downloadManager?.getBookFile(bookSlug)?.parentFile
+            ?: context?.let { File(it.filesDir, "hadiths") }
+
+        if (hadithsDir != null && hadithsDir.exists()) {
+            val araFile = File(hadithsDir, "${bookSlug}_ara.json").takeIf { it.exists() && it.length() > 500 }
+            val urdFile = File(hadithsDir, "${bookSlug}_urdu.json").takeIf { it.exists() && it.length() > 500 }
+                ?: File(hadithsDir, "${bookSlug}_urd.json").takeIf { it.exists() && it.length() > 500 }
+
+            var matchedArabic = ""
+            var matchedUrdu = ""
+            var rBook = -1
+            var rHadith = -1
+            var aNum = ""
+            var finalHNum = trimmed
+
+            // 2a. Search Arabic file for exact Arabic text
+            if (araFile != null) {
+                try {
+                    java.io.FileInputStream(araFile).bufferedReader(Charsets.UTF_8).use { br ->
+                        val reader = android.util.JsonReader(br)
+                        reader.beginObject()
+                        while (reader.hasNext()) {
+                            if (reader.nextName() == "hadiths") {
+                                reader.beginArray()
+                                var idx = 0
+                                while (reader.hasNext()) {
+                                    reader.beginObject()
+                                    var hNum = ""
+                                    var arabicNum = ""
+                                    var text = ""
+                                    var refB = -1
+                                    var refH = -1
+                                    while (reader.hasNext()) {
+                                        when (reader.nextName()) {
+                                            "hadithnumber", "hadithNumber" -> hNum = safeReadJsonStringOrNumber(reader)
+                                            "arabicnumber" -> arabicNum = safeReadJsonStringOrNumber(reader)
+                                            "text" -> text = safeReadJsonStringOrNumber(reader)
+                                            "reference" -> {
+                                                try {
+                                                    reader.beginObject()
+                                                    while (reader.hasNext()) {
+                                                        when (reader.nextName()) {
+                                                            "book" -> refB = safeReadJsonInt(reader)
+                                                            "hadith" -> refH = safeReadJsonInt(reader)
+                                                            else -> reader.skipValue()
+                                                        }
+                                                    }
+                                                    reader.endObject()
+                                                } catch (_: Exception) {
+                                                    try { reader.skipValue() } catch (_: Exception) {}
+                                                }
+                                            }
+                                            else -> reader.skipValue()
+                                        }
+                                    }
+                                    reader.endObject()
+                                    val normH = normalizeHadithNumber(hNum)
+                                    val normA = normalizeHadithNumber(arabicNum)
+                                    val isMatch = (normH.isNotBlank() && normH == normTarget) ||
+                                            hNum == trimmed ||
+                                            (normA.isNotBlank() && normA == normTarget) ||
+                                            (idx + 1 == numInt && normTarget == (idx + 1).toString())
+
+                                    if (isMatch && text.isNotBlank()) {
+                                        matchedArabic = text.trim()
+                                        finalHNum = if (normH.isNotBlank()) normH else hNum
+                                        rBook = refB
+                                        rHadith = refH
+                                        aNum = arabicNum
+                                        break
+                                    }
+                                    idx++
+                                }
+                                break // Exit hadiths loop safely without calling reader.endArray() on an incomplete stream
+                            } else {
+                                reader.skipValue()
+                            }
+                        }
+                    }
+                } catch (_: Throwable) {}
+            }
+
+            // 2b. Fetch Urdu translation from downloaded file or supplement
+            if (urdFile != null) {
+                val supplement = UrduHadithSupplement.getTranslation(bookSlug, finalHNum)
+                    ?: UrduHadithSupplement.getTranslation(bookSlug, trimmed)
+                if (!supplement.isNullOrBlank()) {
+                    matchedUrdu = cleanTranslationText(supplement, "urd", bookSlug, finalHNum)
+                } else {
+                    matchedUrdu = readSingleHadithTranslationStreaming(
+                        file = urdFile,
+                        targetHadithNumber = finalHNum,
+                        targetNormNum = normalizeHadithNumber(finalHNum),
+                        targetRefBook = rBook,
+                        targetRefHadith = rHadith,
+                        targetArabicNum = aNum,
+                        lang = "urd",
+                        bookSlug = bookSlug,
+                        targetIndex = if (numInt > 0) numInt - 1 else 0
+                    )
+                }
+            } else {
+                val supplement = UrduHadithSupplement.getTranslation(bookSlug, finalHNum)
+                    ?: UrduHadithSupplement.getTranslation(bookSlug, trimmed)
+                if (!supplement.isNullOrBlank()) {
+                    matchedUrdu = cleanTranslationText(supplement, "urd", bookSlug, finalHNum)
+                }
+            }
+
+            if (matchedArabic.isNotBlank() || matchedUrdu.isNotBlank()) {
+                return@withContext Hadith(
+                    id = (finalHNum.toLongOrNull() ?: numInt.toLong()),
+                    bookSlug = bookSlug,
+                    bookName = bookName,
+                    chapterNumber = if (rBook > 0) rBook else 1,
+                    chapterNameArabic = "",
+                    chapterNameUrdu = "",
+                    hadithNumber = finalHNum,
+                    arabicText = matchedArabic.ifBlank { "قال رسول الله ﷺ" },
+                    urduTranslation = matchedUrdu,
+                    englishTranslation = "",
+                    activeTranslation = matchedUrdu,
+                    bookRefNumber = rBook,
+                    hadithRefNumber = rHadith,
+                    arabicNumber = aNum
+                )
+            }
+        }
+
+        // 3. Fallback: check BuiltInHadithsProvider or AuthoritativeContentProvider for this book
+        val builtIn = BuiltInHadithsProvider.getHadithsForBook(bookSlug)
+        val matchBuiltIn = builtIn.firstOrNull {
+            it.hadithNumber == trimmed || normalizeHadithNumber(it.hadithNumber) == normTarget
+        }
+
+        if (matchBuiltIn != null) {
+            return@withContext matchBuiltIn
+        }
+
+        val authChapters = AuthoritativeContentProvider.getChaptersForBook(bookSlug)
+        for (ch in authChapters) {
+            val hadiths = AuthoritativeContentProvider.getHadithsForChapter(bookSlug, ch.chapterNumber)
+            val match = hadiths.firstOrNull {
+                it.hadithNumber == trimmed || normalizeHadithNumber(it.hadithNumber) == normTarget
+            }
+            if (match != null) {
+                return@withContext match
+            }
+        }
+
+        // 4. Return first available authentic Hadith for this book so preview is always populated
+        val fallbackHadiths = AuthoritativeContentProvider.getHadithsForChapter(bookSlug, 1)
+        if (fallbackHadiths.isNotEmpty()) {
+            return@withContext fallbackHadiths.first()
+        }
+
+        null
+    }
+
     fun clearCacheForBook(bookSlug: String) {
         parsedBooksCache.remove(bookSlug)
         translationsCache.keys.filter { it.startsWith(bookSlug) }.forEach { translationsCache.remove(it) }
     }
 
-    private fun readJsonStringOrNumber(reader: android.util.JsonReader): String {
+    private fun safeReadJsonStringOrNumber(reader: android.util.JsonReader): String {
         return try {
             when (reader.peek()) {
-                android.util.JsonToken.STRING -> reader.nextString()
-                android.util.JsonToken.NUMBER -> reader.nextString()
-                android.util.JsonToken.BOOLEAN -> reader.nextBoolean().toString()
+                android.util.JsonToken.STRING,
+                android.util.JsonToken.NUMBER,
+                android.util.JsonToken.BOOLEAN -> reader.nextString()
                 android.util.JsonToken.NULL -> {
                     reader.nextNull()
                     ""
@@ -828,9 +1063,32 @@ class HadithRepository(
                 }
             }
         } catch (_: Exception) {
+            try { reader.skipValue() } catch (_: Exception) {}
             ""
         }
     }
+
+    private fun safeReadJsonInt(reader: android.util.JsonReader): Int {
+        return try {
+            when (reader.peek()) {
+                android.util.JsonToken.NUMBER -> reader.nextInt()
+                android.util.JsonToken.STRING -> reader.nextString().toIntOrNull() ?: -1
+                android.util.JsonToken.NULL -> {
+                    reader.nextNull()
+                    -1
+                }
+                else -> {
+                    reader.skipValue()
+                    -1
+                }
+            }
+        } catch (_: Exception) {
+            try { reader.skipValue() } catch (_: Exception) {}
+            -1
+        }
+    }
+
+    private fun readJsonStringOrNumber(reader: android.util.JsonReader): String = safeReadJsonStringOrNumber(reader)
 
     private fun readSingleHadithTranslationStreaming(
         file: File,
@@ -840,7 +1098,8 @@ class HadithRepository(
         targetRefHadith: Int = -1,
         targetArabicNum: String = "",
         lang: String,
-        bookSlug: String
+        bookSlug: String,
+        targetIndex: Int = -1
     ): String {
         if (!file.exists() || file.length() < 500) return ""
         try {
@@ -860,16 +1119,16 @@ class HadithRepository(
                             var rHadith = -1
                             while (reader.hasNext()) {
                                 when (reader.nextName()) {
-                                    "hadithnumber", "hadithNumber" -> hNum = readJsonStringOrNumber(reader)
-                                    "arabicnumber" -> aNum = readJsonStringOrNumber(reader)
-                                    "text" -> text = try { reader.nextString() } catch (_: Exception) { "" }
+                                    "hadithnumber", "hadithNumber" -> hNum = safeReadJsonStringOrNumber(reader)
+                                    "arabicnumber" -> aNum = safeReadJsonStringOrNumber(reader)
+                                    "text" -> text = safeReadJsonStringOrNumber(reader)
                                     "reference" -> {
                                         try {
                                             reader.beginObject()
                                             while (reader.hasNext()) {
                                                 when (reader.nextName()) {
-                                                    "book" -> rBook = try { reader.nextInt() } catch (_: Exception) { -1 }
-                                                    "hadith" -> rHadith = try { reader.nextInt() } catch (_: Exception) { -1 }
+                                                    "book" -> rBook = safeReadJsonInt(reader)
+                                                    "hadith" -> rHadith = safeReadJsonInt(reader)
                                                     else -> reader.skipValue()
                                                 }
                                             }
@@ -888,19 +1147,19 @@ class HadithRepository(
                             val matches = (normH.isNotBlank() && normH == targetNormNum) ||
                                     hNum == targetHadithNumber ||
                                     (targetArabicNum.isNotBlank() && (normA == targetArabicNum || aNum == targetArabicNum)) ||
-                                    (targetRefBook > 0 && targetRefHadith > 0 && rBook == targetRefBook && rHadith == targetRefHadith)
+                                    (targetRefBook > 0 && targetRefHadith > 0 && rBook == targetRefBook && rHadith == targetRefHadith) ||
+                                    (index == targetIndex && targetIndex >= 0 && normH.isBlank() && text.isNotBlank())
 
                             if (matches && text.isNotBlank()) {
                                 return cleanTranslationText(text, lang, bookSlug, targetNormNum)
                             }
                             index++
                         }
-                        reader.endArray()
+                        break
                     } else {
                         reader.skipValue()
                     }
                 }
-                reader.endObject()
             }
         } catch (_: Throwable) {}
         return ""
@@ -995,17 +1254,17 @@ class HadithRepository(
                             var rChapter = -1
                             while (reader.hasNext()) {
                                 when (reader.nextName()) {
-                                    "hadithnumber", "hadithNumber" -> hNum = readJsonStringOrNumber(reader)
-                                    "arabicnumber" -> aNum = readJsonStringOrNumber(reader)
-                                    "text" -> text = try { reader.nextString() } catch (_: Exception) { "" }
+                                    "hadithnumber", "hadithNumber" -> hNum = safeReadJsonStringOrNumber(reader)
+                                    "arabicnumber" -> aNum = safeReadJsonStringOrNumber(reader)
+                                    "text" -> text = safeReadJsonStringOrNumber(reader)
                                     "reference" -> {
                                         try {
                                             reader.beginObject()
                                             while (reader.hasNext()) {
                                                 when (reader.nextName()) {
-                                                    "book" -> rBook = try { reader.nextInt() } catch (_: Exception) { -1 }
-                                                    "hadith" -> rHadith = try { reader.nextInt() } catch (_: Exception) { -1 }
-                                                    "chapter" -> rChapter = try { reader.nextInt() } catch (_: Exception) { -1 }
+                                                    "book" -> rBook = safeReadJsonInt(reader)
+                                                    "hadith" -> rHadith = safeReadJsonInt(reader)
+                                                    "chapter" -> rChapter = safeReadJsonInt(reader)
                                                     else -> reader.skipValue()
                                                 }
                                             }
@@ -1359,13 +1618,15 @@ class HadithRepository(
         query: String,
         searchByNumber: Boolean,
         langCode: String,
-        bookSlug: String? = null
+        bookSlug: String? = null,
+        onProgress: ((Int, List<Hadith>) -> Unit)? = null
     ): Pair<List<Hadith>, Int> {
         if (query.isBlank()) return Pair(emptyList(), 0)
         var lastBatch = HadithSearchBatch(emptyList(), 0)
         kotlinx.coroutines.runBlocking {
             searchDownloadedHadithsFlow(query, searchByNumber, langCode, bookSlug).collect {
                 lastBatch = it
+                onProgress?.invoke(it.progress, it.results)
             }
         }
         val downloadedCount = getAllBooks().count { downloadManager?.isBookDownloaded(it.slug) == true }

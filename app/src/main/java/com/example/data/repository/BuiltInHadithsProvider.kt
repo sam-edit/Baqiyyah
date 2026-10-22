@@ -1090,7 +1090,10 @@ object BuiltInHadithsProvider {
         return when {
             bookSlug.contains("nawawi") -> getNawawiHadiths()
             bookSlug.contains("qudsi") -> getQudsiHadiths()
-            else -> emptyList()
+            else -> {
+                val chapters = AuthoritativeContentProvider.getChaptersForBook(bookSlug)
+                chapters.flatMap { AuthoritativeContentProvider.getHadithsForChapter(bookSlug, it.chapterNumber) }
+            }
         }
     }
 }

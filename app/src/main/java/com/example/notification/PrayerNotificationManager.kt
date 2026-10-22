@@ -9,10 +9,13 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.Color
 import android.os.Build
+import android.os.PowerManager
 import android.widget.Toast
 import androidx.core.app.NotificationCompat
 import com.example.MainActivity
+import com.example.data.repository.SettingsRepository
 import com.example.domain.model.DailyPrayerSchedule
+import com.example.domain.model.PrayerAlertType
 import com.example.domain.model.PrayerType
 import java.time.LocalDateTime
 import java.time.LocalTime
@@ -20,15 +23,30 @@ import java.time.ZoneId
 
 class PrayerAlarmReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
+        val pm = context.getSystemService(Context.POWER_SERVICE) as? PowerManager
+        val wakeLock = pm?.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "aldeen:receiver_wake")
+        try {
+            wakeLock?.acquire(8000L)
+        } catch (_: Exception) {}
+
+        try {
         when (intent.action) {
             Intent.ACTION_BOOT_COMPLETED,
             Intent.ACTION_MY_PACKAGE_REPLACED,
             Intent.ACTION_TIME_CHANGED,
             Intent.ACTION_TIMEZONE_CHANGED,
             Intent.ACTION_DATE_CHANGED,
-            "android.intent.action.TIME_SET" -> {
-                // When phone reboots or time zone/date updates, recalculate and re-register exact alarms immediately
+            AlarmManager.ACTION_SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED,
+            PrayerNotificationManager.ACTION_MIDNIGHT_REFRESH -> {
+                // Boot/clock changes invalidate old registrations; midnight retains due prayers.
+                if (intent.action != PrayerNotificationManager.ACTION_MIDNIGHT_REFRESH) {
+                    context.getSharedPreferences("prayer_alarm_state", Context.MODE_PRIVATE)
+                        .edit().remove("signature").apply()
+                }
                 PrayerNotificationManager.rescheduleAlarmsFromSavedState(context)
+            }
+            PrayerNotificationManager.ACTION_TEST_NOTIFICATION -> {
+                PrayerNotificationManager.showTestNotification(context)
             }
             PrayerNotificationManager.ACTION_MARK_PRAYED -> {
                 val notificationId = intent.getIntExtra("notification_id", 0)
@@ -58,6 +76,15 @@ class PrayerAlarmReceiver : BroadcastReceiver() {
                 val prayerTime = intent.getStringExtra("prayer_time") ?: ""
                 val prayerType = intent.getStringExtra("prayer_type")
 
+                val type = runCatching { PrayerType.valueOf(prayerType ?: "") }.getOrNull()
+                val trigger = intent.getLongExtra("scheduled_at", 0)
+                val alarmPrefs = context.getSharedPreferences("prayer_alarm_state", Context.MODE_PRIVATE)
+                if (trigger != 0L && type != null) {
+                    if (alarmPrefs.getLong("scheduled:${type.name}", 0) != trigger ||
+                        alarmPrefs.getLong("delivered:${type.name}", 0) == trigger) return
+                    alarmPrefs.edit().putLong("delivered:${type.name}", trigger).apply()
+                }
+                try {
                 PrayerNotificationManager.showPrayerNotification(
                     context = context,
                     prayerName = prayerName,
@@ -67,10 +94,14 @@ class PrayerAlarmReceiver : BroadcastReceiver() {
                     prayerType = prayerType
                 )
 
-                // Automatically re-arm all upcoming alarms for tomorrow / next cycle
-                // So even if the user never opens the app for days or weeks, exact alarms keep rolling forever!
-                PrayerNotificationManager.rescheduleAlarmsFromSavedState(context)
+                } finally {
+                    // Re-arm only this prayer: do not cancel simultaneous pending alerts.
+                    if (type != null) PrayerNotificationManager.rescheduleAlarmsFromSavedState(context, type)
+                }
             }
+        }
+        } finally {
+            runCatching { if (wakeLock?.isHeld == true) wakeLock.release() }
         }
     }
 }
@@ -80,7 +111,11 @@ object PrayerNotificationManager {
     private const val CHANNEL_NAME = "Prayer Times & Adhan (اوقاتِ نماز)"
     const val ACTION_MARK_PRAYED = "com.example.notification.ACTION_MARK_PRAYED"
     const val ACTION_SNOOZE = "com.example.notification.ACTION_SNOOZE"
+    const val ACTION_TEST_NOTIFICATION = "com.example.notification.ACTION_TEST_NOTIFICATION"
+    const val ACTION_MIDNIGHT_REFRESH = "com.example.notification.ACTION_MIDNIGHT_REFRESH"
+    private const val MIDNIGHT_REQUEST_CODE = 90001
     private const val TEST_NOTIFICATION_ID = 99999
+    private const val TEST_ALARM_REQUEST_CODE = 99998
 
     fun createNotificationChannel(context: Context) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -126,6 +161,10 @@ object PrayerNotificationManager {
         prayerType: String? = null
     ) {
         createNotificationChannel(context)
+        if (Build.VERSION.SDK_INT >= 33 && androidx.core.content.ContextCompat.checkSelfPermission(
+                context, android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) return
+        val configuredType = runCatching { PrayerType.valueOf(prayerType ?: "") }.getOrNull()
+        if (configuredType != null && SettingsRepository.getInstance(context).prayerNotifications.value[configuredType] != true) return
 
         val notificationId = prayerName.hashCode()
 
@@ -192,8 +231,39 @@ object PrayerNotificationManager {
             builder.setLargeIcon(logoBitmap)
         }
 
+        // Full Screen Alert for Medium (5s) and Strong (10s) modes
+        val alertType = try {
+            SettingsRepository.getInstance(context).getPrayerAlertType()
+        } catch (_: Exception) {
+            PrayerAlertType.LIGHT
+        }
+
+        if (alertType != PrayerAlertType.LIGHT) {
+            val fullScreenIntent = Intent(context, FullScreenPrayerAlertActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS
+                putExtra("prayer_name", prayerName)
+                putExtra("prayer_urdu", prayerUrdu)
+                putExtra("city_name", cityName)
+                putExtra("prayer_time", prayerTime)
+                putExtra("prayer_type", prayerType)
+                putExtra("alert_type", alertType.id)
+                putExtra("notification_id", notificationId)
+            }
+            val fullScreenPendingIntent = PendingIntent.getActivity(
+                context,
+                notificationId + 99,
+                fullScreenIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+            builder.setFullScreenIntent(fullScreenPendingIntent, true)
+
+            try {
+                context.startActivity(fullScreenIntent)
+            } catch (_: Exception) {}
+        }
+
         val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
-        manager?.notify(notificationId, builder.build())
+        runCatching { manager?.notify(notificationId, builder.build()) }
     }
 
     fun scheduleSnooze(
@@ -286,128 +356,149 @@ object PrayerNotificationManager {
             builder.setLargeIcon(logoBitmap)
         }
 
-        val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
-        manager?.notify(TEST_NOTIFICATION_ID, builder.build())
-    }
+        // Full Screen Alert for Medium (5s) and Strong (10s) modes during test
+        val alertType = try {
+            SettingsRepository.getInstance(context).getPrayerAlertType()
+        } catch (_: Exception) {
+            PrayerAlertType.LIGHT
+        }
 
-    fun scheduleDailyPrayerAlarms(
-        context: Context,
-        schedule: DailyPrayerSchedule,
-        cityName: String,
-        notificationSettings: Map<PrayerType, Boolean>
-    ) {
-        createNotificationChannel(context)
-        val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager ?: return
-        val settingsRepo = com.example.data.repository.SettingsRepository.getInstance(context)
-        val zone = settingsRepo.getNotificationZoneId()
-
-        val prayersToSchedule = listOf(
-            Triple(PrayerType.FAJR, schedule.fajr, 101),
-            Triple(PrayerType.DHUHR, schedule.dhuhr, 102),
-            Triple(PrayerType.ASR, schedule.asr, 103),
-            Triple(PrayerType.MAGHRIB, schedule.maghrib, 104),
-            Triple(PrayerType.ISHA, schedule.isha, 105)
-        )
-
-        val nowInZone = LocalDateTime.now(zone)
-        val timeFormatter = java.time.format.DateTimeFormatter.ofPattern("hh:mm a", java.util.Locale.ENGLISH)
-
-        prayersToSchedule.forEach { (type, time, requestCode) ->
-            val isEnabled = notificationSettings[type] ?: true
-            val formattedTime = time.format(timeFormatter)
-
-            val intent = Intent(context, PrayerAlarmReceiver::class.java).apply {
-                putExtra("prayer_name", type.displayName)
-                putExtra("prayer_urdu", type.urduName)
-                putExtra("city_name", cityName)
-                putExtra("prayer_time", formattedTime)
-                putExtra("prayer_type", type.name)
+        if (alertType != PrayerAlertType.LIGHT) {
+            val fullScreenIntent = Intent(context, FullScreenPrayerAlertActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS
+                putExtra("prayer_name", "Test Prayer Alert")
+                putExtra("prayer_urdu", "ٹیسٹ نماز الرٹ")
+                putExtra("city_name", "Al Deen App")
+                putExtra("prayer_time", currentTimeStr)
+                putExtra("alert_type", alertType.id)
+                putExtra("notification_id", TEST_NOTIFICATION_ID)
             }
-
-            val pendingIntent = PendingIntent.getBroadcast(
+            val fullScreenPendingIntent = PendingIntent.getActivity(
                 context,
-                requestCode,
-                intent,
+                TEST_NOTIFICATION_ID + 99,
+                fullScreenIntent,
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
+            builder.setFullScreenIntent(fullScreenPendingIntent, true)
 
-            if (!isEnabled) {
-                alarmManager.cancel(pendingIntent)
-                return@forEach
-            }
-
-            var prayerDateTime = LocalDateTime.of(schedule.date, time)
-            if (prayerDateTime.isBefore(nowInZone)) {
-                // If today's prayer time has passed in the location's timezone, schedule for tomorrow's occurrence
-                prayerDateTime = prayerDateTime.plusDays(1)
-            }
-
-            val triggerEpochMillis = prayerDateTime.atZone(zone).toInstant().toEpochMilli()
-            scheduleExactAlarm(alarmManager, triggerEpochMillis, pendingIntent)
+            try {
+                context.startActivity(fullScreenIntent)
+            } catch (_: Exception) {}
         }
+
+        val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+        runCatching { manager?.notify(TEST_NOTIFICATION_ID, builder.build()) }
     }
+
+    fun scheduleTestNotificationAlarm(context: Context, delaySeconds: Int = 3) {
+        createNotificationChannel(context)
+        val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager ?: return
+        val intent = Intent(context, PrayerAlarmReceiver::class.java).apply {
+            action = ACTION_TEST_NOTIFICATION
+        }
+        val pendingIntent = PendingIntent.getBroadcast(
+            context,
+            TEST_ALARM_REQUEST_CODE,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val triggerEpochMillis = System.currentTimeMillis() + (delaySeconds * 1000L)
+        scheduleExactAlarm(alarmManager, triggerEpochMillis, pendingIntent)
+    }
+
+    fun cancelTestNotificationAlarm(context: Context) {
+        val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager ?: return
+        val intent = Intent(context, PrayerAlarmReceiver::class.java).apply {
+            action = ACTION_TEST_NOTIFICATION
+        }
+        val pendingIntent = PendingIntent.getBroadcast(
+            context,
+            TEST_ALARM_REQUEST_CODE,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        alarmManager.cancel(pendingIntent)
+    }
+
+    // Kept for existing callers; background location owns notification scheduling.
+    fun scheduleDailyPrayerAlarms(
+        context: Context, schedule: DailyPrayerSchedule, cityName: String,
+        notificationSettings: Map<PrayerType, Boolean>
+    ) = rescheduleAlarmsFromSavedState(context)
 
     private fun scheduleExactAlarm(alarmManager: AlarmManager, triggerEpochMillis: Long, pendingIntent: PendingIntent) {
         try {
-            // AlarmClockInfo guarantees exact firing down to the second, bypassing Doze mode and manufacturer batching
-            val alarmClockInfo = AlarmManager.AlarmClockInfo(triggerEpochMillis, pendingIntent)
-            alarmManager.setAlarmClock(alarmClockInfo, pendingIntent)
-        } catch (_: SecurityException) {
-            try {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                    alarmManager.setExactAndAllowWhileIdle(
-                        AlarmManager.RTC_WAKEUP,
-                        triggerEpochMillis,
-                        pendingIntent
-                    )
-                } else {
-                    alarmManager.setExact(
-                        AlarmManager.RTC_WAKEUP,
-                        triggerEpochMillis,
-                        pendingIntent
-                    )
-                }
-            } catch (_: Exception) {
-                alarmManager.set(
-                    AlarmManager.RTC_WAKEUP,
-                    triggerEpochMillis,
-                    pendingIntent
-                )
+            if (Build.VERSION.SDK_INT < 31 || alarmManager.canScheduleExactAlarms()) {
+                alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerEpochMillis, pendingIntent)
+            } else {
+                alarmManager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerEpochMillis, pendingIntent)
             }
+        } catch (_: SecurityException) {
+            alarmManager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerEpochMillis, pendingIntent)
         }
     }
 
-    /**
-     * Recalculates and schedules the next exact prayer alarms using stored settings, location,
-     * calculation method, and juristic school without requiring the user to open the app.
-     */
-    fun rescheduleAlarmsFromSavedState(context: Context) {
-        try {
-            val settingsRepo = com.example.data.repository.SettingsRepository.getInstance(context)
-            val location = settingsRepo.getNotificationLocation()
-            val zoneId = settingsRepo.getNotificationZoneId()
-            val method = settingsRepo.calculationMethod.value
-            val school = settingsRepo.juristicSchool.value
-            val notifs = settingsRepo.prayerNotifications.value
-            val todayDate = java.time.LocalDate.now(zoneId)
-
-            val schedule = com.example.domain.prayer.PrayerCalculationEngine.calculateDailySchedule(
-                date = todayDate,
-                latitude = location.latitude,
-                longitude = location.longitude,
-                method = method,
-                juristicSchool = school,
-                timeZone = zoneId
-            )
-
-            scheduleDailyPrayerAlarms(
-                context = context,
-                schedule = schedule,
-                cityName = location.cityName,
-                notificationSettings = notifs
-            )
-        } catch (_: Exception) {
-            // Guard against background startup issues
+    @Synchronized
+    fun rescheduleAlarmsFromSavedState(context: Context, onlyPrayer: PrayerType? = null) {
+        val manager = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager ?: return
+        val settings = SettingsRepository.getInstance(context)
+        val location = settings.getBackgroundLocation()
+        val prefs = context.getSharedPreferences("prayer_alarm_state", Context.MODE_PRIVATE)
+        val midnightIntent = Intent(context, PrayerAlarmReceiver::class.java).setAction(ACTION_MIDNIGHT_REFRESH)
+        val midnightPending = PendingIntent.getBroadcast(context, MIDNIGHT_REQUEST_CODE, midnightIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+        if (location == null) {
+            PrayerType.values().forEach { type ->
+                val pending = PendingIntent.getBroadcast(context, PrayerAlarmPlan.requestCode(type),
+                    Intent(context, PrayerAlarmReceiver::class.java), PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE)
+                if (pending != null) manager.cancel(pending)
+            }
+            manager.cancel(midnightPending)
+            prefs.edit().clear().apply()
+            return
+        }
+        val zone = settings.getZoneIdForLocation(location)
+        val now = java.time.ZonedDateTime.now(zone)
+        val method = settings.calculationMethod.value
+        val school = settings.juristicSchool.value
+        val signature = "${location.latitude}|${location.longitude}|${zone.id}|${method.id}|${school.id}"
+        val sameLocation = prefs.getString("signature", null) == signature
+        fun schedule(date: java.time.LocalDate) = com.example.data.repository.PrayerScheduleCache.get(
+            context, location, method, school, zone, date)
+        // Refresh today's persistent cache even when all notification toggles are off.
+        schedule(now.toLocalDate())
+        val format = java.time.format.DateTimeFormatter.ofPattern("hh:mm a", java.util.Locale.ENGLISH)
+        PrayerType.values().filter { onlyPrayer == null || it == onlyPrayer }.forEach { type ->
+            val intent = Intent(context, PrayerAlarmReceiver::class.java)
+            val code = PrayerAlarmPlan.requestCode(type)
+            if (settings.prayerNotifications.value[type] != true) {
+                val pending = PendingIntent.getBroadcast(context, code, intent,
+                    PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE)
+                if (pending != null) manager.cancel(pending)
+                prefs.edit().remove("scheduled:${type.name}").apply()
+                return@forEach
+            }
+            val previous = prefs.getLong("scheduled:${type.name}", 0)
+            val nowMillis = now.toInstant().toEpochMilli()
+            // Preserve an already-due broadcast while another simultaneous prayer is handled.
+            if (sameLocation && previous > 0 && nowMillis - previous in 0L..120_000L &&
+                prefs.getLong("delivered:${type.name}", 0) != previous) return@forEach
+            val next = PrayerAlarmPlan.next(type, now, ::schedule)
+            val trigger = next.toInstant().toEpochMilli()
+            intent.putExtra("prayer_name", type.displayName)
+                .putExtra("prayer_urdu", type.urduName).putExtra("city_name", location.cityName)
+                .putExtra("prayer_time", next.toLocalTime().format(format))
+                .putExtra("prayer_type", type.name).putExtra("scheduled_at", trigger)
+            val pending = PendingIntent.getBroadcast(context, code, intent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+            scheduleExactAlarm(manager, trigger, pending)
+            prefs.edit().putLong("scheduled:${type.name}", trigger).apply()
+        }
+        prefs.edit().putString("signature", signature).apply()
+        scheduleExactAlarm(manager, PrayerAlarmPlan.nextMidnight(now).toInstant().toEpochMilli(), midnightPending)
+        if (onlyPrayer == null) runCatching {
+            com.example.widget.PrayerWidgetProvider.updateAllWidgets(context)
+            com.example.widget.PrayerWidgetProvider.scheduleNextBoundaryUpdate(context)
         }
     }
 }

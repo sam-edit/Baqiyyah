@@ -7,7 +7,7 @@ data class HadithBook(
     val arabicName: String,
     val totalHadithCount: Int,
     val totalChaptersCount: Int
-) {
+) : java.io.Serializable {
     val name: String get() = englishName
 }
 
@@ -18,7 +18,7 @@ data class HadithChapter(
     val arabicTitle: String,
     val urduTitle: String,
     val englishTitle: String
-)
+) : java.io.Serializable
 
 data class Hadith(
     val id: Long,

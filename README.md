@@ -18,6 +18,7 @@ Baqiyyah is more than just an app; it is your daily spiritual companion. Whether
 * 🌙 **Islamic Calendar:** View Islamic dates and useful Hijri calendar information.
 * 🔔 **Prayer Notifications:** Receive notifications and reminders for your daily prayers.
 * 💭 **Daily Spiritual Reminders:** Get gentle reminders throughout the day to encourage remembrance of Allah and consistent worship.
+* 🍀 **Share Happiness:** Share images using built in editor including Ayahs, Hadiths and custom texts.
 
 ## 🌿 Why Choose Baqiyyah?
 
@@ -29,12 +30,15 @@ Baqiyyah is more than just an app; it is your daily spiritual companion. Whether
 ## 📱 Screenshots
 
 <p align="center">
-  <img src="https://github.com/ruleno1studio/Baqqiyah/blob/assets/screenshots/home.jpg" width="140">
-  <img src="https://github.com/ruleno1studio/Baqqiyah/blob/assets/screenshots/quran.jpg" width="140">
-  <img src="https://github.com/ruleno1studio/Baqqiyah/blob/assets/screenshots/hadeeth.jpg" width="140">
-  <img src="https://github.com/ruleno1studio/Baqqiyah/blob/assets/screenshots/goals.jpg" width="140">
-  <img src="https://github.com/ruleno1studio/Baqqiyah/blob/assets/screenshots/more.jpg" width="140">
-  <img src="https://github.com/ruleno1studio/Baqqiyah/blob/assets/screenshots/feedback.jpg" width="140">
+  <img src="https://github.com/ruleno1studio/Baqqiyah/blob/assets/screenshots/home.png" width="140">
+  <img src="https://github.com/ruleno1studio/Baqqiyah/blob/assets/screenshots/quran.png" width="140">
+  <img src="https://github.com/ruleno1studio/Baqqiyah/blob/assets/screenshots/quran_inside.png" width="140">
+  <img src="https://github.com/ruleno1studio/Baqqiyah/blob/assets/screenshots/hadeeth.png" width="140">
+  <img src="https://github.com/ruleno1studio/Baqqiyah/blob/assets/screenshots/goals.png" width="140">
+  <img src="https://github.com/ruleno1studio/Baqqiyah/blob/assets/screenshots/report_inside.png" width="140">
+  <img src="https://github.com/ruleno1studio/Baqqiyah/blob/assets/screenshots/more.png" width="140">
+  <img src="https://github.com/ruleno1studio/Baqqiyah/blob/assets/screenshots/happiness.png" width="140">
+  <img src="https://github.com/ruleno1studio/Baqqiyah/blob/assets/screenshots/feedback.png" width="140">
 </p>
 
 ## 🛠️ Technology
@@ -54,17 +58,18 @@ Baqiyyah uses established Islamic APIs and services for different features:
 * **AlQuran.cloud** — Quran audio and related Quran data.
 * **QuranEnc** — Quran translations and word-by-word content.
 * **Hadith API** — Hadith data and translations.
+* **Zia-ul-Quran Publishers** — 16 Line Quran Majeed for offline reading.
 
 ## 👥 Team
 
-### ruleno1studio
+### Ruleno1studio
 
-**ruleno1studio** is an independent studio building software, applications, websites, tools, games, and other digital products.
+**Ruleno1studio** is an independent studio building software, applications, websites, tools, games, and other digital products.
 
 ### Contributors
 
-* **Muhammad Samran** — Developer — [samranansar00@gmail.com](mailto:samranansar00@gmail.com)
-* **Muhammad Waseem** — Developer — [wasiwithheart@gmail.com](mailto:wasiwithheart@gmail.com)
+* **Muhammad Waseem** — Developer — **[wasiwithheart@gmail.com](mailto:wasiwithheart@gmail.com)**
+* **Muhammad Samran** — Developer — **[samranansar00@gmail.com](mailto:samranansar00@gmail.com)**
 
 Baqiyyah is currently being developed collaboratively by the contributors listed above.
 
@@ -72,7 +77,7 @@ Baqiyyah is currently being developed collaboratively by the contributors listed
 
 Found a bug or an issue in Baqiyyah?
 
-Please report it by emailing us at **[ruleno1corp@gmail.com](mailto:ruleno1corp@gmail.com)**.
+Please report it by emailing us at **[ruleno1support@gmail.com](mailto:ruleno1support@gmail.com)**.
 
 When reporting a bug, please include:
 - A brief description of the issue

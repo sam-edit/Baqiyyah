@@ -6,9 +6,11 @@ import android.media.ToneGenerator
 import android.os.Build
 import android.os.VibrationEffect
 import android.os.Vibrator
-import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.*
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -31,6 +33,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
@@ -67,7 +70,8 @@ data class DhikrHistoryEntry(
 @Composable
 fun TasbeehScreen(
     onBack: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    initialPhraseId: String? = null
 ) {
     val context = LocalContext.current
     val vibrator = remember { context.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator }
@@ -122,13 +126,41 @@ fun TasbeehScreen(
     }
 
     val allPhrases = remember(customPhrases) { defaultPhrases + customPhrases }
-    var selectedPhrase by remember { mutableStateOf(allPhrases.first()) }
+    var selectedPhrase by remember {
+        mutableStateOf(
+            if (!initialPhraseId.isNullOrBlank()) {
+                allPhrases.firstOrNull { it.id == initialPhraseId } ?: allPhrases.first()
+            } else {
+                val activeSaved = prefs.getString("active_phrase_id", null)
+                allPhrases.firstOrNull { it.id == activeSaved } ?: allPhrases.first()
+            }
+        )
+    }
 
     // Counts & Targets
     var count by remember { mutableIntStateOf(prefs.getInt("current_count_${selectedPhrase.id}", 0)) }
     var targetLimit by remember { mutableIntStateOf(prefs.getInt("target_limit_${selectedPhrase.id}", selectedPhrase.defaultTarget)) }
     var isInfiniteMode by remember { mutableStateOf(prefs.getBoolean("infinite_mode_${selectedPhrase.id}", false)) }
     var completedLaps by remember { mutableIntStateOf(count / (if (targetLimit > 0) targetLimit else 33)) }
+
+    // Synchronize count and limits whenever SharedPreferences change (e.g. from Home Screen Widget clicks)
+    DisposableEffect(selectedPhrase.id) {
+        val listener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+            if (key == "current_count_${selectedPhrase.id}") {
+                val updatedCount = prefs.getInt("current_count_${selectedPhrase.id}", 0)
+                count = updatedCount
+                completedLaps = if (targetLimit > 0) updatedCount / targetLimit else 0
+            } else if (key == "target_limit_${selectedPhrase.id}") {
+                targetLimit = prefs.getInt("target_limit_${selectedPhrase.id}", selectedPhrase.defaultTarget)
+            } else if (key == "infinite_mode_${selectedPhrase.id}") {
+                isInfiniteMode = prefs.getBoolean("infinite_mode_${selectedPhrase.id}", false)
+            }
+        }
+        prefs.registerOnSharedPreferenceChangeListener(listener)
+        onDispose {
+            prefs.unregisterOnSharedPreferenceChangeListener(listener)
+        }
+    }
 
     // Sound and vibration toggles
     var vibrateEnabled by remember { mutableStateOf(prefs.getBoolean("vibrate_enabled", true)) }
@@ -193,6 +225,7 @@ fun TasbeehScreen(
         count++
         completedLaps = if (targetLimit > 0) count / targetLimit else 0
         prefs.edit().putInt("current_count_${selectedPhrase.id}", count).apply()
+        com.example.widget.TasbeehWidgetProvider.updateAllWidgets(context)
 
         // Check if target reached
         if (!isInfiniteMode && targetLimit > 0 && count % targetLimit == 0) {
@@ -209,6 +242,7 @@ fun TasbeehScreen(
             count--
             completedLaps = if (targetLimit > 0) count / targetLimit else 0
             prefs.edit().putInt("current_count_${selectedPhrase.id}", count).apply()
+            com.example.widget.TasbeehWidgetProvider.updateAllWidgets(context)
             triggerHaptic(strong = false)
         }
     }
@@ -220,6 +254,7 @@ fun TasbeehScreen(
         count = 0
         completedLaps = 0
         prefs.edit().putInt("current_count_${selectedPhrase.id}", 0).apply()
+        com.example.widget.TasbeehWidgetProvider.updateAllWidgets(context)
         triggerHaptic(strong = true)
     }
 
@@ -233,6 +268,8 @@ fun TasbeehScreen(
         targetLimit = prefs.getInt("target_limit_${newPhrase.id}", newPhrase.defaultTarget)
         isInfiniteMode = prefs.getBoolean("infinite_mode_${newPhrase.id}", false)
         completedLaps = if (targetLimit > 0) count / targetLimit else 0
+        prefs.edit().putString("active_phrase_id", newPhrase.id).apply()
+        com.example.widget.TasbeehWidgetProvider.updateAllWidgets(context)
     }
 
     val progress = remember(count, targetLimit, isInfiniteMode) {
@@ -443,6 +480,16 @@ fun TasbeehScreen(
                 val targets = listOf(33, 99, 100, 1000)
                 targets.forEach { target ->
                     val isSelected = !isInfiniteMode && targetLimit == target
+                    val pillBg by animateColorAsState(
+                        targetValue = if (isSelected) EmeraldPrimary else Color.Transparent,
+                        animationSpec = tween(220),
+                        label = "target_bg_$target"
+                    )
+                    val pillText by animateColorAsState(
+                        targetValue = if (isSelected) Color.White else TextSecondary,
+                        animationSpec = tween(220),
+                        label = "target_text_$target"
+                    )
                     Surface(
                         onClick = {
                             isInfiniteMode = false
@@ -453,14 +500,14 @@ fun TasbeehScreen(
                                 .apply()
                         },
                         shape = CircleShape,
-                        color = if (isSelected) EmeraldPrimary else Color.Transparent,
+                        color = pillBg,
                         modifier = Modifier.padding(horizontal = 2.dp)
                     ) {
                         Text(
                             text = "$target",
                             style = MaterialTheme.typography.labelSmall.copy(
                                 fontWeight = FontWeight.Bold,
-                                color = if (isSelected) Color.White else TextSecondary
+                                color = pillText
                             ),
                             modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
                         )
@@ -469,37 +516,57 @@ fun TasbeehScreen(
 
                 // Custom target count button
                 val isCustomSelected = !isInfiniteMode && !targets.contains(targetLimit)
+                val customBg by animateColorAsState(
+                    targetValue = if (isCustomSelected) EmeraldPrimary else Color.Transparent,
+                    animationSpec = tween(220),
+                    label = "custom_target_bg"
+                )
+                val customText by animateColorAsState(
+                    targetValue = if (isCustomSelected) Color.White else TextSecondary,
+                    animationSpec = tween(220),
+                    label = "custom_target_text"
+                )
                 Surface(
                     onClick = { showCustomCountDialog = true },
                     shape = CircleShape,
-                    color = if (isCustomSelected) EmeraldPrimary else Color.Transparent,
+                    color = customBg,
                     modifier = Modifier.padding(horizontal = 2.dp)
                 ) {
                     Text(
                         text = if (isCustomSelected) "$targetLimit" else "Custom",
                         style = MaterialTheme.typography.labelSmall.copy(
                             fontWeight = FontWeight.Bold,
-                            color = if (isCustomSelected) Color.White else TextSecondary
+                            color = customText
                         ),
                         modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
                     )
                 }
 
                 // Free (Infinite) Mode
+                val freeBg by animateColorAsState(
+                    targetValue = if (isInfiniteMode) EmeraldPrimary else Color.Transparent,
+                    animationSpec = tween(220),
+                    label = "free_mode_bg"
+                )
+                val freeText by animateColorAsState(
+                    targetValue = if (isInfiniteMode) Color.White else TextSecondary,
+                    animationSpec = tween(220),
+                    label = "free_mode_text"
+                )
                 Surface(
                     onClick = {
                         isInfiniteMode = true
                         prefs.edit().putBoolean("infinite_mode_${selectedPhrase.id}", true).apply()
                     },
                     shape = CircleShape,
-                    color = if (isInfiniteMode) EmeraldPrimary else Color.Transparent,
+                    color = freeBg,
                     modifier = Modifier.padding(horizontal = 2.dp)
                 ) {
                     Text(
                         text = "Free ∞",
                         style = MaterialTheme.typography.labelSmall.copy(
                             fontWeight = FontWeight.Bold,
-                            color = if (isInfiniteMode) Color.White else TextSecondary
+                            color = freeText
                         ),
                         modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
                     )
@@ -511,8 +578,13 @@ fun TasbeehScreen(
             val isPressed by interactionSource.collectIsPressedAsState()
             val animatedScale by animateFloatAsState(
                 targetValue = if (isPressed) 0.92f else 1.0f,
-                animationSpec = spring(stiffness = 800f),
+                animationSpec = spring(dampingRatio = 0.65f, stiffness = 650f),
                 label = "tasbeeh_tap_scale"
+            )
+            val animatedProgress by animateFloatAsState(
+                targetValue = progress,
+                animationSpec = tween(durationMillis = 200, easing = FastOutSlowInEasing),
+                label = "tasbeeh_progress_sweep"
             )
 
             Box(
@@ -528,9 +600,9 @@ fun TasbeehScreen(
                     .testTag("tasbeeh_tap_area"),
                 contentAlignment = Alignment.Center
             ) {
-                // Circular Progress Ring
+                // Circular Progress Ring with smooth animated progress sweep
                 CircularProgressIndicator(
-                    progress = { progress },
+                    progress = { animatedProgress },
                     modifier = Modifier.fillMaxSize(),
                     color = EmeraldPrimary,
                     trackColor = EmeraldContainer.copy(alpha = 0.4f),
@@ -541,14 +613,28 @@ fun TasbeehScreen(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center
                 ) {
-                    Text(
-                        text = "$count",
-                        style = MaterialTheme.typography.displayLarge.copy(
-                            fontWeight = FontWeight.Bold,
-                            color = EmeraldPrimary,
-                            fontSize = 62.sp
+                    AnimatedContent(
+                        targetState = count,
+                        transitionSpec = {
+                            if (targetState > initialState) {
+                                (slideInVertically(animationSpec = spring(stiffness = 500f)) { it / 2 } + fadeIn(tween(140)))
+                                    .togetherWith(slideOutVertically(animationSpec = spring(stiffness = 500f)) { -it / 2 } + fadeOut(tween(100)))
+                            } else {
+                                (slideInVertically(animationSpec = spring(stiffness = 500f)) { -it / 2 } + fadeIn(tween(140)))
+                                    .togetherWith(slideOutVertically(animationSpec = spring(stiffness = 500f)) { it / 2 } + fadeOut(tween(100)))
+                            }
+                        },
+                        label = "tasbeeh_number_anim"
+                    ) { currentCount ->
+                        Text(
+                            text = "$currentCount",
+                            style = MaterialTheme.typography.displayLarge.copy(
+                                fontWeight = FontWeight.Bold,
+                                color = EmeraldPrimary,
+                                fontSize = 62.sp
+                            )
                         )
-                    )
+                    }
 
                     Text(
                         text = if (isInfiniteMode) "Target: ∞" else "Target: $targetLimit • Lap: $completedLaps",

@@ -130,6 +130,41 @@ class ExampleRobolectricTest {
   }
 
   @Test
+  fun `test all chapters exist for all hadith books`() {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    val hadithRepo = com.example.data.repository.HadithRepository(context)
+
+    val bukhariChapters = hadithRepo.getChaptersForBook("sahih-bukhari")
+    assertEquals("Bukhari must have all 97 chapters", 97, bukhariChapters.size)
+    assertEquals(1, bukhariChapters.first().chapterNumber)
+    assertEquals(97, bukhariChapters.last().chapterNumber)
+
+    val muslimChapters = hadithRepo.getChaptersForBook("sahih-muslim")
+    assertEquals("Muslim must have all 57 chapters", 57, muslimChapters.size)
+
+    val nasaiChapters = hadithRepo.getChaptersForBook("sunan-an-nasai")
+    assertEquals("Nasai must have all 52 chapters", 52, nasaiChapters.size)
+
+    val abudawudChapters = hadithRepo.getChaptersForBook("sunan-abi-dawud")
+    assertEquals("Abu Dawud must have all 43 chapters", 43, abudawudChapters.size)
+
+    val tirmidhiChapters = hadithRepo.getChaptersForBook("jami-at-tirmidhi")
+    assertEquals("Tirmidhi must have all 49 chapters", 49, tirmidhiChapters.size)
+
+    val ibnMajahChapters = hadithRepo.getChaptersForBook("sunan-ibn-majah")
+    assertEquals("Ibn Majah must have all 38 chapters", 38, ibnMajahChapters.size)
+
+    val malikChapters = hadithRepo.getChaptersForBook("muwatta-malik")
+    assertEquals("Muwatta Malik must have all 61 chapters", 61, malikChapters.size)
+
+    val nawawiChapters = hadithRepo.getChaptersForBook("arbaeen-nawawi")
+    assertEquals("Arbaeen Nawawi must have 1 chapter", 1, nawawiChapters.size)
+
+    val qudsiChapters = hadithRepo.getChaptersForBook("hadith-qudsi")
+    assertEquals("Hadith Qudsi must have 1 chapter", 1, qudsiChapters.size)
+  }
+
+  @Test
   fun `test search by word across books returns matches with translations`() {
     val context = ApplicationProvider.getApplicationContext<Context>()
     val hadithRepo = com.example.data.repository.HadithRepository(context)

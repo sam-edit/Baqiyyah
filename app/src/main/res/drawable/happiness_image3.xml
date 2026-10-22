@@ -1,0 +1,63 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="800dp"
+    android:height="800dp"
+    android:viewportWidth="800"
+    android:viewportHeight="800">
+
+    <!-- Deep Midnight Gradient Background -->
+    <path
+        android:pathData="M0,0 L800,0 L800,800 L0,800 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:angle="270"
+                android:startColor="#050B14"
+                android:centerColor="#0B1A30"
+                android:endColor="#162E4A"
+                android:type="linear" />
+        </aapt:attr>
+    </path>
+
+    <!-- Subtle Golden Nebula Glow in Center -->
+    <path
+        android:pathData="M150,150 a250,250 0 1,0 500,0 a250,250 0 1,0 -500,0">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:gradientRadius="350"
+                android:centerX="400"
+                android:centerY="350"
+                android:startColor="#26D4AF37"
+                android:endColor="#00000000"
+                android:type="radial" />
+        </aapt:attr>
+    </path>
+
+    <!-- Stars -->
+    <path android:fillColor="#E6FFFFFF" android:pathData="M120,90 l2,4 l4,2 l-4,2 l-2,4 l-2,-4 l-4,-2 l4,-2 Z" />
+    <path android:fillColor="#B3FFFFFF" android:pathData="M680,120 l2,4 l4,2 l-4,2 l-2,4 l-2,-4 l-4,-2 l4,-2 Z" />
+    <path android:fillColor="#D9FFD700" android:pathData="M240,180 l3,6 l6,3 l-6,3 l-3,6 l-3,-6 l-6,-3 l6,-3 Z" />
+    <path android:fillColor="#99FFFFFF" android:pathData="M550,220 l2,4 l4,2 l-4,2 l-2,4 l-2,-4 l-4,-2 l4,-2 Z" />
+    <path android:fillColor="#E6FFFFFF" android:pathData="M380,80 l2,4 l4,2 l-4,2 l-2,4 l-2,-4 l-4,-2 l4,-2 Z" />
+    <path android:fillColor="#80FFFFFF" android:pathData="M80,300 l1.5,3 l3,1.5 l-3,1.5 l-1.5,3 l-1.5,-3 l-3,-1.5 l3,-1.5 Z" />
+    <path android:fillColor="#B3FFD700" android:pathData="M710,340 l2,4 l4,2 l-4,2 l-2,4 l-2,-4 l-4,-2 l4,-2 Z" />
+
+    <!-- Ornate Golden Crescent Moon & Star at top center -->
+    <path
+        android:fillColor="#E5E6B800"
+        android:pathData="M400,110 A70,70 0 1,0 470,180 A56,56 0 1,1 400,110 Z" />
+    <path
+        android:fillColor="#FFF5CC44"
+        android:pathData="M445,140 l4,8 l8,4 l-8,4 l-4,8 l-4,-8 l-8,-4 l8,-4 Z" />
+
+    <!-- Subtle Silhouette Dome and Minarets at Bottom -->
+    <path
+        android:pathData="M0,800 L800,800 L800,680 C740,680 710,650 670,640 L670,540 L650,540 L650,510 L660,510 L660,490 L640,460 L620,490 L620,510 L630,510 L630,650 C580,660 550,680 500,680 C480,640 440,610 400,600 C360,610 320,640 300,680 C250,680 220,660 170,650 L170,510 L180,510 L180,490 L160,460 L140,490 L140,510 L150,510 L150,540 L130,540 L130,640 C90,650 60,680 0,680 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:angle="270"
+                android:startColor="#33030A14"
+                android:endColor="#8802060C"
+                android:type="linear" />
+        </aapt:attr>
+    </path>
+</vector>

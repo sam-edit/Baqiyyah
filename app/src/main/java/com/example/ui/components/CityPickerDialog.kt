@@ -104,7 +104,8 @@ fun CityPickerDialog(
                                         countryName = displayRegion,
                                         latitude = lat,
                                         longitude = lon,
-                                        isAutoDetected = false
+                                        isAutoDetected = false,
+                                        timeZoneId = item.optString("timezone", "").takeIf { it.isNotBlank() }
                                     )
                                 )
                             }

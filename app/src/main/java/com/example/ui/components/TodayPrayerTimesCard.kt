@@ -1,6 +1,9 @@
 package com.example.ui.components
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
@@ -11,13 +14,13 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -92,7 +95,9 @@ fun TodayPrayerTimesCard(
                         shape = AlDeenTokens.ShapePill,
                         color = EmeraldContainer,
                         border = BorderStroke(1.dp, EmeraldPrimary.copy(alpha = 0.5f)),
-                        modifier = Modifier.testTag("toggle_asr_school_button")
+                        modifier = Modifier
+                            .pressScaleEffect(0.96f)
+                            .testTag("toggle_asr_school_button")
                     ) {
                         Row(
                             modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
@@ -148,19 +153,37 @@ fun TodayPrayerTimesCard(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.Center
             ) {
+                val detailsBgColor by animateColorAsState(
+                    targetValue = if (isExpanded) EmeraldContainer else MaterialTheme.colorScheme.surfaceVariant,
+                    animationSpec = tween(240, easing = FastOutSlowInEasing),
+                    label = "details_btn_bg"
+                )
+                val detailsBorderColor by animateColorAsState(
+                    targetValue = if (isExpanded) EmeraldPrimary else MintBorder,
+                    animationSpec = tween(240, easing = FastOutSlowInEasing),
+                    label = "details_btn_border"
+                )
+                val arrowRotation by animateFloatAsState(
+                    targetValue = if (isExpanded) 180f else 0f,
+                    animationSpec = tween(260, easing = FastOutSlowInEasing),
+                    label = "details_arrow_rot"
+                )
+
                 Surface(
                     onClick = { isExpanded = !isExpanded },
                     shape = AlDeenTokens.ShapePill,
-                    color = if (isExpanded) EmeraldContainer else MaterialTheme.colorScheme.surfaceVariant,
-                    border = BorderStroke(1.dp, if (isExpanded) EmeraldPrimary else MintBorder),
-                    modifier = Modifier.testTag("today_prayer_detail_button")
+                    color = detailsBgColor,
+                    border = BorderStroke(1.dp, detailsBorderColor),
+                    modifier = Modifier
+                        .pressScaleEffect(0.96f)
+                        .testTag("today_prayer_detail_button")
                 ) {
                     Row(
                         modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = if (isExpanded) "Hide Details" else "Details",
+                            text = if (isExpanded) "Show Less" else "Show More",
                             style = MaterialTheme.typography.labelSmall.copy(
                                 fontWeight = FontWeight.Bold,
                                 color = EmeraldPrimary,
@@ -169,10 +192,12 @@ fun TodayPrayerTimesCard(
                         )
                         Spacer(modifier = Modifier.width(4.dp))
                         Icon(
-                            imageVector = if (isExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
-                            contentDescription = if (isExpanded) "Hide Details" else "Show Details",
+                            imageVector = Icons.Default.KeyboardArrowDown,
+                            contentDescription = if (isExpanded) "Show Less" else "Show More",
                             tint = EmeraldPrimary,
-                            modifier = Modifier.size(16.dp)
+                            modifier = Modifier
+                                .size(16.dp)
+                                .graphicsLayer { rotationZ = arrowRotation }
                         )
                     }
                 }
@@ -181,8 +206,8 @@ fun TodayPrayerTimesCard(
             // 3. Expandable additional prayers with the EXACT SAME vertical block interface
             AnimatedVisibility(
                 visible = isExpanded,
-                enter = expandVertically(animationSpec = tween(AlDeenTokens.AnimationDurationMedium)) + fadeIn(),
-                exit = shrinkVertically(animationSpec = tween(AlDeenTokens.AnimationDurationMedium)) + fadeOut()
+                enter = expandVertically(animationSpec = tween(280, easing = FastOutSlowInEasing)) + fadeIn(animationSpec = tween(220, easing = FastOutSlowInEasing)),
+                exit = shrinkVertically(animationSpec = tween(240, easing = FastOutSlowInEasing)) + fadeOut(animationSpec = tween(180, easing = FastOutSlowInEasing))
             ) {
                 Column(modifier = Modifier.fillMaxWidth()) {
                     Spacer(modifier = Modifier.height(10.dp))
@@ -231,17 +256,19 @@ private fun PrayerBlockItem(
     subtitle: String? = null,
     modifier: Modifier = Modifier
 ) {
+    val borderColor by animateColorAsState(
+        targetValue = if (isActive) EmeraldPrimary else MintBorder,
+        animationSpec = tween(durationMillis = 260, easing = FastOutSlowInEasing),
+        label = "prayer_block_border"
+    )
+
     val backgroundModifier = if (isActive) {
         Modifier.background(ActivePrayerGradient)
     } else {
         Modifier.background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f))
     }
 
-    val borderStroke = if (isActive) {
-        BorderStroke(1.5.dp, EmeraldPrimary)
-    } else {
-        BorderStroke(1.dp, MintBorder)
-    }
+    val borderStroke = BorderStroke(if (isActive) 1.5.dp else 1.dp, borderColor)
 
     Surface(
         modifier = modifier

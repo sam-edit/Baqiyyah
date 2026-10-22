@@ -48,6 +48,14 @@ object UrduHadithSupplement {
         "631.5" to "امام مالک رحمہ اللہ نے فرمایا: زکوٰۃ کے احکام میں اعتدال اور فقراء و مساکین کے حق کی ادائیگی کا سختی سے اہتمام کیا جائے گا۔"
     )
 
+    private val abudawudSupplements: Map<String, String> = mapOf(
+        "5274" to "حضرت ابوہریرہ رضی اللہ عنہ سے روایت ہے کہ نبی کریم صلی اللہ علیہ وسلم نے فرمایا: اللہ عزوجل فرماتا ہے کہ ابن آدم مجھے ایذاء دیتا ہے، وہ زمانے کو برا بھلا کہتا ہے حالانکہ میں ہی زمانہ (زمانہ کا پیدا کرنے والا اور گردش دینے والا) ہوں، تمام اختیارات میرے ہاتھ میں ہیں، میں ہی رات اور دن کو الٹ پلٹ کرتا ہوں۔"
+    )
+
+    private val ibnmajahSupplements: Map<String, String> = mapOf(
+        "4341" to "حضرت ابوہریرہ رضی اللہ عنہ سے روایت ہے کہ رسول اللہ صلی اللہ علیہ وسلم نے فرمایا: تم میں سے کوئی ایسا نہیں جس کے دو ٹھکانے نہ ہوں: ایک ٹھکانہ جنت میں اور ایک ٹھکانہ جہنم میں، پس جب وہ مرتا ہے اور جہنم میں داخل ہوتا ہے تو اہل جنت اس کے (جنت والے) ٹھکانے کے وارث بن جاتے ہیں، اور یہی اللہ تعالیٰ کے اس فرمان کا مفہوم ہے: {أُولَئِكَ هُمُ الْوَارِثُونَ} (یہی لوگ وارث ہیں)۔"
+    )
+
     fun getTranslation(bookSlug: String, hadithNumber: String): String? {
         val normNum = HadithRepository.normalizeHadithNumber(hadithNumber)
         val slug = bookSlug.lowercase().trim()
@@ -61,6 +69,12 @@ object UrduHadithSupplement {
             }
             slug.contains("malik") || slug.contains("muwatta") -> {
                 malikSupplements[normNum] ?: malikSupplements[hadithNumber]
+            }
+            slug.contains("abudawud") || slug.contains("abi-dawud") -> {
+                abudawudSupplements[normNum] ?: abudawudSupplements[hadithNumber]
+            }
+            slug.contains("ibnmajah") || slug.contains("ibn-majah") -> {
+                ibnmajahSupplements[normNum] ?: ibnmajahSupplements[hadithNumber]
             }
             slug.contains("nawawi") || slug.contains("arbaeen") -> {
                 BuiltInHadithsProvider.getHadithsForBook("arbaeen-nawawi").firstOrNull { 

@@ -1,3 +1,7 @@
 <resources>
     <string name="app_name">Baqiyyah</string>
+    <string name="widget_tasbeeh_label">Quick Tasbeeh</string>
+    <string name="widget_tasbeeh_description">Tap to count dhikr directly from your home screen with real-time sync</string>
+    <string name="widget_prayer_label">Prayer Dashboard</string>
+    <string name="widget_prayer_description">Live Islamic prayer times, upcoming prayer countdown, and daily schedule</string>
 </resources>

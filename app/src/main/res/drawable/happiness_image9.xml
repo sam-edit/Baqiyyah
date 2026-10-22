@@ -1,0 +1,45 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="960dp"
+    android:height="540dp"
+    android:viewportWidth="960"
+    android:viewportHeight="540">
+
+    <!-- Twilight Sky Gradient (16:9) -->
+    <path
+        android:pathData="M0,0 L960,0 L960,540 L0,540 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:angle="270"
+                android:startColor="#1E112A"
+                android:centerColor="#3A1C3C"
+                android:endColor="#6A2E44"
+                android:type="linear" />
+        </aapt:attr>
+    </path>
+
+    <!-- Subtle Twilight Moon & Star in Sky -->
+    <path
+        android:fillColor="#FFEBC2"
+        android:pathData="M780,70 A42,42 0 1,0 822,112 A33,33 0 1,1 780,70 Z" />
+    <path
+        android:fillColor="#FFF4D0"
+        android:pathData="M805,90 l2.5,5 l5,2.5 l-5,2.5 l-2.5,5 l-2.5,-5 l-5,-2.5 l5,-2.5 Z" />
+
+    <!-- Distant Dunes Silhouette -->
+    <path
+        android:pathData="M0,540 L960,540 L960,400 C800,380 650,440 500,410 C350,380 180,430 0,400 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:angle="270"
+                android:startColor="#26101F"
+                android:endColor="#140611"
+                android:type="linear" />
+        </aapt:attr>
+    </path>
+
+    <!-- Foreground Dunes Silhouette with Caravan / Mosque Outline -->
+    <path
+        android:pathData="M0,540 L960,540 L960,460 C750,450 600,490 400,470 C200,450 100,490 0,470 Z"
+        android:fillColor="#0D030B" />
+</vector>

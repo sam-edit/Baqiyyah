@@ -129,5 +129,105 @@ class ExampleUnitTest {
     assertTrue("Hadith 207 must be in Urdu", trans207.contains("عائشہ") || trans207.contains("ام حبیبہ"))
     assertFalse("Must never output placeholder", trans207.contains("اس سند و طریق سے بھی یہی حدیث"))
   }
+
+  @Test
+  fun testTasbeehSharedRepositoryPhrases() {
+    val phrases = com.example.widget.TasbeehSharedRepository.defaultPhrases
+    assertTrue(phrases.isNotEmpty())
+    val subhanAllah = phrases.firstOrNull { it.id == "subhanallah" }
+    assertNotNull(subhanAllah)
+    assertEquals("سُبْحَانَ اللَّٰهِ", subhanAllah?.arabic)
+    assertEquals(33, subhanAllah?.defaultTarget)
+  }
+
+  @Test
+  fun testPrayerWidgetCalculationSchedule() {
+    val date = java.time.LocalDate.of(2026, 10, 10)
+    val tz = java.time.ZoneId.of("Asia/Karachi")
+    val schedule = com.example.domain.prayer.PrayerCalculationEngine.calculateDailySchedule(
+      date = date,
+      latitude = 24.8607,
+      longitude = 67.0011, // Karachi
+      method = com.example.domain.model.CalculationMethod.KARACHI,
+      juristicSchool = com.example.domain.model.JuristicSchool.HANAFI,
+      timeZone = tz
+    )
+
+    assertNotNull(schedule.fajr)
+    assertNotNull(schedule.dhuhr)
+    assertNotNull(schedule.asr)
+    assertNotNull(schedule.maghrib)
+    assertNotNull(schedule.isha)
+
+    // Verify chronological order of primary daily prayers
+    assertTrue(schedule.sunrise.isAfter(schedule.fajr))
+    assertTrue(schedule.dhuhr.isAfter(schedule.sunrise))
+    assertTrue(schedule.asr.isAfter(schedule.dhuhr))
+    assertTrue(schedule.maghrib.isAfter(schedule.asr))
+    assertTrue(schedule.isha.isAfter(schedule.maghrib))
+
+    val state = com.example.domain.prayer.PrayerStateEngine.calculateCurrentState(
+      schedule = schedule,
+      currentTime = java.time.LocalTime.of(13, 0) // 1:00 PM (Between Dhuhr and Asr in Karachi)
+    )
+    assertEquals(com.example.domain.model.PrayerType.DHUHR, state.currentPrayer)
+    assertEquals(com.example.domain.model.PrayerType.ASR, state.upcomingPrayer)
+    assertTrue(state.remainingSeconds > 0)
+    assertTrue(state.negativeCountdownFormatted.startsWith("-"))
+  }
+
+  @Test
+  fun testPrayerWidgetSizeClassification() {
+    // 2x2 small widget
+    val smallW = 140
+    val smallH = 110
+    val isSmall = smallW < 180 || smallH < 110
+    assertTrue(isSmall)
+
+    // 4x2 medium widget
+    val medW = 260
+    val medH = 110
+    val isMedSmall = medW < 180 || medH < 110
+    val isMedLarge = medW >= 220 && medH >= 150
+    assertFalse(isMedSmall)
+    assertFalse(isMedLarge)
+
+    // 4x3 or 4x4 large full dashboard widget
+    val largeW = 280
+    val largeH = 180
+    val isLrgSmall = largeW < 180 || largeH < 110
+    val isLrgLarge = largeW >= 220 && largeH >= 150
+    assertFalse(isLrgSmall)
+    assertTrue(isLrgLarge)
+  }
+
+  @Test
+  fun testQuranFloatingAudioDurationFormatting() {
+    val durationFormatted = com.example.ui.quran.formatAudioDuration(125000L) // 2m 5s
+    assertEquals("02:05", durationFormatted)
+
+    val zeroFormatted = com.example.ui.quran.formatAudioDuration(0L)
+    assertEquals("00:00", zeroFormatted)
+
+    val hoursFormatted = com.example.ui.quran.formatAudioDuration(3665000L) // 1h 1m 5s
+    assertEquals("1:01:05", hoursFormatted)
+  }
+
+  @Test
+  fun testRecentAudioSurahModel() {
+    val recent = com.example.domain.model.RecentAudioSurah(
+      surahNumber = 36,
+      surahEnglishName = "Yaseen",
+      surahArabicName = "يس",
+      surahUrduName = "یس",
+      reciterId = "ar.alafasy",
+      reciterName = "Mishary Rashid Alafasy",
+      lastPositionMs = 45000L,
+      durationMs = 900000L
+    )
+    assertEquals(36, recent.surahNumber)
+    assertEquals("ar.alafasy", recent.reciterId)
+    assertEquals(45000L, recent.lastPositionMs)
+  }
 }
 

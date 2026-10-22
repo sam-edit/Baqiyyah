@@ -19,6 +19,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
@@ -43,6 +44,7 @@ fun GoalsScreen(
     formattedUpcomingTime: String,
     onOpenDrawer: () -> Unit,
     onLocationClick: () -> Unit,
+    isDrawerOpen: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -82,15 +84,18 @@ fun GoalsScreen(
         com.example.ui.components.AlDeenHeader(
             location = location,
             onMenuClick = onOpenDrawer,
-            onLocationClick = onLocationClick
+            onLocationClick = onLocationClick,
+            isMenuOpen = isDrawerOpen
         )
 
-        // Compact Prayer Dashboard
+        // Compact Prayer Dashboard and Goals Banner
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = AlDeenTokens.SpacingLarge)
         ) {
+
+
             com.example.ui.components.CompactPrayerDashboardCard(
                 prayerState = prayerState,
                 formattedCurrentTime = formattedCurrentTime,
@@ -133,7 +138,9 @@ fun GoalsScreen(
                     ),
                     contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
                     elevation = ButtonDefaults.buttonElevation(defaultElevation = 2.dp),
-                    modifier = Modifier.testTag("goals_report_button")
+                    modifier = Modifier
+                        .buttonPressScale()
+                        .testTag("goals_report_button")
                 ) {
                     Icon(
                         imageVector = Icons.Default.Download,
@@ -690,13 +697,25 @@ private fun GoalItemRow(
     val context = androidx.compose.ui.platform.LocalContext.current
     val backgroundColor by animateColorAsState(
         targetValue = if (goal.isCompleted) EmeraldContainer.copy(alpha = 0.5f) else MaterialTheme.colorScheme.surface,
+        animationSpec = androidx.compose.animation.core.tween(220),
         label = "goal_bg"
+    )
+    val borderColor by animateColorAsState(
+        targetValue = if (goal.isCompleted) EmeraldPrimary.copy(alpha = 0.5f) else MintBorder,
+        animationSpec = androidx.compose.animation.core.tween(220),
+        label = "goal_border"
+    )
+    val checkScale by animateFloatAsState(
+        targetValue = if (goal.isCompleted) 1.15f else 1.0f,
+        animationSpec = androidx.compose.animation.core.spring(dampingRatio = 0.5f, stiffness = 420f),
+        label = "goal_check_scale"
     )
 
     Card(
         modifier = modifier
             .fillMaxWidth()
             .clip(AlDeenTokens.ShapeCard)
+            .pressScaleEffect(0.98f)
             .clickable {
                 if (isEditable) {
                     onToggle()
@@ -707,10 +726,7 @@ private fun GoalItemRow(
             .testTag("goal_item_${goal.goalId}"),
         shape = AlDeenTokens.ShapeCard,
         colors = CardDefaults.cardColors(containerColor = backgroundColor),
-        border = BorderStroke(
-            AlDeenTokens.CardBorderWidth,
-            if (goal.isCompleted) EmeraldPrimary.copy(alpha = 0.4f) else MintBorder
-        ),
+        border = BorderStroke(AlDeenTokens.CardBorderWidth, borderColor),
         elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
     ) {
         Row(
@@ -740,7 +756,12 @@ private fun GoalItemRow(
                         disabledCheckedColor = EmeraldPrimary.copy(alpha = 0.7f),
                         disabledUncheckedColor = TextTertiary.copy(alpha = 0.35f)
                     ),
-                    modifier = Modifier.testTag("goal_checkbox_${goal.goalId}")
+                    modifier = Modifier
+                        .graphicsLayer {
+                            scaleX = checkScale
+                            scaleY = checkScale
+                        }
+                        .testTag("goal_checkbox_${goal.goalId}")
                 )
 
                 Spacer(modifier = Modifier.width(8.dp))

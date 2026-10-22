@@ -10,6 +10,7 @@ import com.example.data.local.AlDeenDatabase
 import com.example.data.repository.BookmarksRepository
 import com.example.data.repository.HadithRepository
 import com.example.domain.model.*
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 
@@ -24,6 +25,8 @@ class HadithViewModel(application: Application) : AndroidViewModel(application) 
     val isTranslationEnabled: StateFlow<Boolean> = downloadManager.isTranslationEnabled
     val selectedLanguageCode: StateFlow<String> = downloadManager.selectedLanguageCode
     val supportedLanguages: List<HadithLanguage> = downloadManager.supportedLanguages
+    val onlineLoadingKeys: StateFlow<Set<String>> = downloadManager.onlineLoadingKeys
+    val onlineErrorKeys: StateFlow<Set<String>> = downloadManager.onlineErrorKeys
 
     fun getLanguagesForBook(bookSlug: String): List<HadithLanguage> =
         downloadManager.getLanguagesForBook(bookSlug)
@@ -121,14 +124,23 @@ class HadithViewModel(application: Application) : AndroidViewModel(application) 
     private val _selectedBook = MutableStateFlow(books.first())
     val selectedBook: StateFlow<HadithBook> = _selectedBook.asStateFlow()
 
+    private val _isChaptersLoading = MutableStateFlow(false)
+    val isChaptersLoading: StateFlow<Boolean> = _isChaptersLoading.asStateFlow()
+
     // Chapters for Active Book, observing downloadStatusMap to auto-refresh when book is downloaded/deleted
     val chapters: StateFlow<List<HadithChapter>> = combine(_selectedBook, downloadStatusMap) { book, _ ->
-        hadithRepository.getChaptersForBook(book.slug)
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+        val list = hadithRepository.getChaptersForBook(book.slug)
+        _isChaptersLoading.value = false
+        list
+    }.flowOn(Dispatchers.IO)
+     .stateIn(viewModelScope, SharingStarted.Eagerly, hadithRepository.getChaptersForBook(books.first().slug))
 
     // Active Chapter Selection
     private val _selectedChapter = MutableStateFlow<HadithChapter?>(null)
     val selectedChapter: StateFlow<HadithChapter?> = _selectedChapter.asStateFlow()
+
+    private val _isHadithsLoading = MutableStateFlow(false)
+    val isHadithsLoading: StateFlow<Boolean> = _isHadithsLoading.asStateFlow()
 
     // Ahadith for Active Chapter (recomputes when book, chapter, download status, active language, or translation revision changes)
     val hadithsForChapter: StateFlow<List<Hadith>> = combine(
@@ -139,13 +151,15 @@ class HadithViewModel(application: Application) : AndroidViewModel(application) 
         downloadManager.translationRevision
     ) { book, chapter, langCode, _, _ ->
         if (chapter != null) {
-            hadithRepository.clearCacheForBook(book.slug)
-            hadithRepository.invalidateTranslationCache(book.slug, langCode)
-            hadithRepository.getHadithsForChapter(book.slug, chapter.chapterNumber, langCode)
+            val list = hadithRepository.getHadithsForChapter(book.slug, chapter.chapterNumber, langCode)
+            _isHadithsLoading.value = false
+            list
         } else {
+            _isHadithsLoading.value = false
             emptyList()
         }
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    }.flowOn(Dispatchers.IO)
+     .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     val bookmarkedRefs: StateFlow<Set<String>> = bookmarksRepository.allBookmarks
         .map { list -> list.map { it.referenceId }.toSet() }
@@ -167,6 +181,12 @@ class HadithViewModel(application: Application) : AndroidViewModel(application) 
 
     fun downloadLanguage(bookSlug: String, langCode: String) {
         downloadManager.downloadLanguage(bookSlug, langCode)
+    }
+
+    /** API call only (no permanent download): shows the language online until the user taps Download. */
+    fun fetchLanguageOnline(bookSlug: String, langCode: String) {
+        if (downloadManager.isLanguageDownloading(bookSlug, langCode)) return
+        downloadManager.fetchLanguageOnline(bookSlug, langCode)
     }
 
     fun deleteLanguage(bookSlug: String, langCode: String) {
@@ -219,16 +239,33 @@ class HadithViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun selectBook(book: HadithBook) {
+        val changed = _selectedBook.value.slug != book.slug
         _selectedBook.value = book
+        if (changed) {
+            _isChaptersLoading.value = true
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                hadithRepository.getChaptersForBook(book.slug)
+                if (isBookDownloaded(book.slug)) {
+                    // Pre-index book data on IO dispatcher so first chapter tap opens instantaneously
+                    hadithRepository.getHadithsForChapter(book.slug, 1, selectedLanguageCode.value)
+                }
+            } finally {
+                _isChaptersLoading.value = false
+            }
+        }
     }
 
     fun selectChapter(chapter: HadithChapter) {
+        _isHadithsLoading.value = true
         _selectedChapter.value = chapter
         val currentLang = selectedLanguageCode.value
+        // No auto-download: fetch via API for viewing only; offline download happens only via the Download button
         if (!downloadManager.isLanguageDownloaded(chapter.bookSlug, currentLang) &&
             !downloadManager.isLanguageDownloading(chapter.bookSlug, currentLang)
         ) {
-            downloadManager.downloadLanguage(chapter.bookSlug, currentLang)
+            downloadManager.fetchLanguageOnline(chapter.bookSlug, currentLang)
         }
     }
 

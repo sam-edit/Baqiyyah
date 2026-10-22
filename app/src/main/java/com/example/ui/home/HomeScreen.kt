@@ -16,6 +16,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.audio.AudioPlaybackState
 import com.example.ui.components.*
 import com.example.ui.theme.AlDeenTokens
+import com.example.ui.theme.staggeredSlideFade
 
 @Composable
 fun HomeScreen(
@@ -26,6 +27,9 @@ fun HomeScreen(
     onOpenAyah: (Int, Int) -> Unit = { _, _ -> },
     onOpenHadithBook: (String) -> Unit = {},
     onOpenHadith: (String, Int, String) -> Unit = { _, _, _ -> },
+    onOpenCalculationSettings: () -> Unit = {},
+    isDrawerOpen: Boolean = false,
+    bannerState: com.example.data.repository.BannerState = com.example.data.repository.BannerState(),
     modifier: Modifier = Modifier
 ) {
     val location by viewModel.userLocation.collectAsStateWithLifecycle()
@@ -42,6 +46,7 @@ fun HomeScreen(
     val activeAyahTranslation by viewModel.activeAyahTranslation.collectAsStateWithLifecycle()
     val activeHadithTranslation by viewModel.activeHadithTranslation.collectAsStateWithLifecycle()
     val juristicSchool by viewModel.juristicSchool.collectAsStateWithLifecycle()
+    val calculationMethod by viewModel.calculationMethod.collectAsStateWithLifecycle()
 
     // Automatically change/refresh moments whenever HomeScreen is entered from any section or tab
     LaunchedEffect(Unit) {
@@ -75,7 +80,8 @@ fun HomeScreen(
         AlDeenHeader(
             location = location,
             onMenuClick = onOpenDrawer,
-            onLocationClick = { showCityPicker = true }
+            onLocationClick = { showCityPicker = true },
+            isMenuOpen = isDrawerOpen
         )
 
         // Scrollable content in exact requested order
@@ -92,14 +98,25 @@ fun HomeScreen(
                 formattedCurrentTime = viewModel.formatTime(prayerState.currentPrayerTime),
                 formattedCurrentStart = viewModel.formatTime(prayerState.currentPrayerStart),
                 formattedUpcomingTime = viewModel.formatTime(prayerState.upcomingPrayerTime),
-                onToggleQuietMode = { viewModel.toggleQuietMode() }
+                onToggleQuietMode = { viewModel.toggleQuietMode() },
+                modifier = Modifier.staggeredSlideFade(0)
             )
 
-            Spacer(modifier = Modifier.height(AlDeenTokens.SpacingMedium))
+            // Calculation method disclaimer directly below Dashboard
+            CalculationMethodNote(
+                method = calculationMethod,
+                onClick = onOpenCalculationSettings,
+                modifier = Modifier
+                    .padding(top = 6.dp)
+                    .staggeredSlideFade(0)
+            )
+
+            Spacer(modifier = Modifier.height(6.dp))
 
             // Search Bar directly below Dashboard
             HomeSearchBarTrigger(
-                onClick = onOpenSearch
+                onClick = onOpenSearch,
+                modifier = Modifier.staggeredSlideFade(1)
             )
 
             Spacer(modifier = Modifier.height(AlDeenTokens.SpacingLarge))
@@ -110,7 +127,8 @@ fun HomeScreen(
                 activePrayer = prayerState.currentPrayer,
                 formatTime = { viewModel.formatTime(it) },
                 juristicSchool = juristicSchool,
-                onToggleJuristicSchool = { viewModel.toggleJuristicSchool() }
+                onToggleJuristicSchool = { viewModel.toggleJuristicSchool() },
+                modifier = Modifier.staggeredSlideFade(2)
             )
 
             Spacer(modifier = Modifier.height(AlDeenTokens.SpacingLarge))
@@ -118,7 +136,8 @@ fun HomeScreen(
             // 4. Special Three-Card Row (Suhur End, Iftar, Tahajjud)
             SpecialThreeCardsRow(
                 schedule = schedule,
-                formatTime = { viewModel.formatTime(it) }
+                formatTime = { viewModel.formatTime(it) },
+                modifier = Modifier.staggeredSlideFade(3)
             )
 
             Spacer(modifier = Modifier.height(AlDeenTokens.SpacingLarge))
@@ -126,7 +145,8 @@ fun HomeScreen(
             // 5. Forbidden Salat Times Card (Sunrise, Zawal, Sunset)
             ForbiddenSalatTimesCard(
                 schedule = schedule,
-                formatTime = { viewModel.formatTime(it) }
+                formatTime = { viewModel.formatTime(it) },
+                modifier = Modifier.staggeredSlideFade(4)
             )
 
             Spacer(modifier = Modifier.height(AlDeenTokens.SpacingLarge))
@@ -143,9 +163,15 @@ fun HomeScreen(
                 dua = currentDua,
                 onRefreshMoment = { viewModel.refreshMoments(it) },
                 ayahTranslation = activeAyahTranslation,
-                hadithTranslation = activeHadithTranslation
+                hadithTranslation = activeHadithTranslation,
+                modifier = Modifier.staggeredSlideFade(5)
             )
-
+            AppConfigBanner(
+                state = bannerState,
+                modifier = Modifier
+                    .padding(top = AlDeenTokens.SpacingLarge)
+                    .staggeredSlideFade(6)
+            )
             Spacer(modifier = Modifier.height(AlDeenTokens.SpacingXXLarge))
         }
     }

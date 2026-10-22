@@ -76,7 +76,7 @@ fun QuranTranslationBottomSheet(
                             )
                         )
                         AlDeenText(
-                            text = "تمام مستند تراجم اور زبانیں",
+                            text = "Various Translations of Holy Quran",
                             style = MaterialTheme.typography.labelSmall.copy(color = TextSecondary)
                         )
                     }
@@ -113,7 +113,7 @@ fun QuranTranslationBottomSheet(
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
                         AlDeenText(
-                            text = "ترجمہ دکھائیں (Show Translation)",
+                            text = "Show Translation",
                             style = MaterialTheme.typography.bodyLarge.copy(
                                 fontWeight = FontWeight.Bold,
                                 color = TextPrimary
@@ -121,7 +121,7 @@ fun QuranTranslationBottomSheet(
                         )
                         Spacer(modifier = Modifier.height(2.dp))
                         AlDeenText(
-                            text = if (isTranslationEnabled) "آیات کے نیچے منتخب زبان میں ترجمہ فعال ہے" else "صرف عربی قرآن دکھایا جائے گا (سادہ قرآن)",
+                            text = if (isTranslationEnabled) "Arabic with Translation will be shown" else "Only Arabic will be shown",
                             style = MaterialTheme.typography.bodySmall.copy(
                                 color = if (isTranslationEnabled) EmeraldPrimary else TextSecondary,
                                 fontSize = 12.5.sp
@@ -147,14 +147,14 @@ fun QuranTranslationBottomSheet(
 
             // 2. AVAILABLE LANGUAGES LIST
             AlDeenText(
-                text = "دستیاب زبانیں اور تراجم (Available API Languages)",
+                text = "Available Languages",
                 style = MaterialTheme.typography.titleSmall.copy(
                     fontWeight = FontWeight.Bold,
                     color = EmeraldPrimary
                 )
             )
             AlDeenText(
-                text = "اپنی پسندیدہ زبان منتخب کریں یا مکمل ترجمہ ڈاؤن لوڈ کریں",
+                text = "Download Translations for offline Reading",
                 style = MaterialTheme.typography.labelSmall.copy(color = TextSecondary)
             )
 
@@ -288,7 +288,7 @@ private fun QuranLanguageItemCard(
                             )
                             Spacer(modifier = Modifier.width(3.dp))
                             AlDeenText(
-                                text = "بلٹ اِن (Ready)",
+                                text = "Ready",
                                 style = MaterialTheme.typography.labelSmall.copy(
                                     color = EmeraldPrimary,
                                     fontWeight = FontWeight.Bold,
@@ -384,7 +384,7 @@ private fun QuranLanguageItemCard(
                                 )
                                 Spacer(modifier = Modifier.width(4.dp))
                                 AlDeenText(
-                                    text = "ڈاؤن لوڈ",
+                                    text = "Download",
                                     style = MaterialTheme.typography.labelSmall.copy(
                                         fontWeight = FontWeight.Bold,
                                         fontSize = 11.sp

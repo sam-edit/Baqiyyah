@@ -1,0 +1,74 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="640dp"
+    android:height="800dp"
+    android:viewportWidth="640"
+    android:viewportHeight="800">
+
+    <!-- Royal Sapphire Blue Gradient Background -->
+    <path
+        android:pathData="M0,0 L640,0 L640,800 L0,800 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:angle="270"
+                android:startColor="#0A192F"
+                android:centerColor="#102A4C"
+                android:endColor="#051020"
+                android:type="linear" />
+        </aapt:attr>
+    </path>
+
+    <!-- Outer Golden Border -->
+    <path
+        android:pathData="M24,24 L616,24 L616,776 L24,776 Z"
+        android:strokeWidth="2.5"
+        android:fillColor="#00000000"
+        android:strokeColor="#C5A059" />
+
+    <path
+        android:pathData="M34,34 L606,34 L606,766 L34,766 Z"
+        android:strokeWidth="1"
+        android:fillColor="#00000000"
+        android:strokeColor="#66C5A059" />
+
+    <!-- Corner Islamic Geometric Ornaments -->
+    <!-- Top-Left -->
+    <path
+        android:pathData="M34,34 L80,34 L57,57 Z M34,34 L34,80 L57,57 Z"
+        android:fillColor="#C5A059" />
+    <!-- Top-Right -->
+    <path
+        android:pathData="M606,34 L560,34 L583,57 Z M606,34 L606,80 L583,57 Z"
+        android:fillColor="#C5A059" />
+    <!-- Bottom-Left -->
+    <path
+        android:pathData="M34,766 L80,766 L57,743 Z M34,766 L34,720 L57,743 Z"
+        android:fillColor="#C5A059" />
+    <!-- Bottom-Right -->
+    <path
+        android:pathData="M606,766 L560,766 L583,743 Z M606,766 L606,720 L583,743 Z"
+        android:fillColor="#C5A059" />
+
+    <!-- Central Glowing Medallion Backdrop -->
+    <path
+        android:pathData="M320,180 C440,180 500,280 500,400 C500,520 440,620 320,620 C200,620 140,520 140,400 C140,280 200,180 320,180 Z"
+        android:strokeWidth="1.5"
+        android:strokeColor="#4DD4AF37">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:gradientRadius="260"
+                android:centerX="320"
+                android:centerY="400"
+                android:startColor="#22C5A059"
+                android:endColor="#00000000"
+                android:type="radial" />
+        </aapt:attr>
+    </path>
+
+    <!-- Top Islamic Crown Arch Archway -->
+    <path
+        android:pathData="M180,34 C180,90 240,140 320,150 C400,140 460,90 460,34"
+        android:strokeWidth="2"
+        android:fillColor="#00000000"
+        android:strokeColor="#C5A059" />
+</vector>

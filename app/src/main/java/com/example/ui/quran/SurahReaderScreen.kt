@@ -1,5 +1,6 @@
 package com.example.ui.quran
 
+import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -50,6 +51,8 @@ fun SurahReaderScreen(
     val surah by viewModel.currentSurah.collectAsStateWithLifecycle()
     val ayahs by viewModel.currentAyahs.collectAsStateWithLifecycle()
     val audioState by viewModel.audioPlaybackState.collectAsStateWithLifecycle()
+    val currentPositionMs by viewModel.audioCurrentPositionMs.collectAsStateWithLifecycle()
+    val durationMs by viewModel.audioDurationMs.collectAsStateWithLifecycle()
     val isOpenedFromPara by viewModel.isOpenedFromPara.collectAsStateWithLifecycle()
     val selectedReciter by viewModel.selectedReciter.collectAsStateWithLifecycle()
     val downloadedRecitersMap by viewModel.downloadedRecitersMap.collectAsStateWithLifecycle()
@@ -61,6 +64,9 @@ fun SurahReaderScreen(
     val activeLanguage = viewModel.supportedTranslationLanguages.firstOrNull { it.id == selectedTranslationId }
     val bookmarkedRefs by viewModel.bookmarkedRefs.collectAsStateWithLifecycle()
     val translationRevision by viewModel.translationRevision.collectAsStateWithLifecycle()
+    val audioRepeatMode by viewModel.audioRepeatMode.collectAsStateWithLifecycle()
+    val audioPlaybackSpeed by viewModel.audioPlaybackSpeed.collectAsStateWithLifecycle()
+    val isAudioMuted by viewModel.isAudioMuted.collectAsStateWithLifecycle()
 
     var showDownloadSheet by remember { mutableStateOf(false) }
     var showReciterSelectionSheet by remember { mutableStateOf(false) }
@@ -109,6 +115,9 @@ fun SurahReaderScreen(
     val isSurahPlaying = surah != null && audioState is AudioPlaybackState.Playing &&
             ((audioState as AudioPlaybackState.Playing).trackId == "surah_${surahNumber}_${selectedReciter.id}" ||
                     (audioState as AudioPlaybackState.Playing).trackId == "surah_${surahNumber}")
+    val isSurahLoading = surah != null && audioState is AudioPlaybackState.Loading &&
+            ((audioState as AudioPlaybackState.Loading).trackId == "surah_${surahNumber}_${selectedReciter.id}" ||
+                    (audioState as AudioPlaybackState.Loading).trackId == "surah_${surahNumber}")
 
     Scaffold(
         topBar = {
@@ -211,11 +220,28 @@ fun SurahReaderScreen(
                     surah = surah!!,
                     selectedReciter = selectedReciter,
                     isPlaying = isSurahPlaying,
+                    isLoading = isSurahLoading,
                     isCurrentReciterDownloaded = isCurrentReciterDownloaded,
                     areAllDownloaded = areAllDownloaded,
                     downloadedCount = downloadedReciters.size,
                     totalCount = viewModel.supportedReciters.size,
+                    currentPositionMs = currentPositionMs,
+                    durationMs = durationMs,
+                    repeatMode = audioRepeatMode,
+                    playbackSpeed = audioPlaybackSpeed,
+                    isMuted = isAudioMuted,
+                    onSeekTo = { pos -> viewModel.seekAudioTo(pos) },
                     onPlayToggle = { viewModel.playSurahAudio(surah!!, selectedReciter) },
+                    onToggleLoop = { viewModel.toggleRepeatMode() },
+                    onChangeSpeed = { viewModel.cyclePlaybackSpeed() },
+                    onToggleMute = { viewModel.toggleAudioMute() },
+                    onRestartAudio = {
+                        if (isSurahPlaying || currentPositionMs > 0L) {
+                            viewModel.restartAudio()
+                        } else {
+                            viewModel.playSurahAudio(surah!!, selectedReciter)
+                        }
+                    },
                     onOpenReciterSelector = { showReciterSelectionSheet = true },
                     onOpenDownloadMenu = { showDownloadSheet = true },
                     onDeleteAll = { showDeleteAllAudioDialog = true }
@@ -441,7 +467,7 @@ fun SurahReaderScreen(
                 ) {
                     Column {
                         AlDeenText(
-                            text = "Download Recitations (تلاوت ڈاؤن لوڈ)",
+                            text = "Download Recitations for offline Playback",
                             style = MaterialTheme.typography.titleMedium.copy(
                                 fontWeight = FontWeight.Bold,
                                 color = TextPrimary
@@ -468,7 +494,7 @@ fun SurahReaderScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = "Select reciters to download:",
+                        text = "Download recitations for offline Playback:",
                         style = MaterialTheme.typography.bodySmall.copy(
                             fontWeight = FontWeight.Medium,
                             color = TextSecondary
@@ -486,7 +512,7 @@ fun SurahReaderScreen(
                             }
                         ) {
                             AlDeenText(
-                                text = if (selectedForDownload.size == nonDownloadedReciters.size) "Deselect All" else "Select All (سب منتخب کریں)",
+                                text = if (selectedForDownload.size == nonDownloadedReciters.size) "Deselect All" else "Select All",
                                 style = MaterialTheme.typography.labelMedium.copy(
                                     fontWeight = FontWeight.Bold,
                                     color = EmeraldPrimary
@@ -666,9 +692,9 @@ fun SurahReaderScreen(
                     Spacer(modifier = Modifier.width(8.dp))
                     AlDeenText(
                         text = if (selectedRecitersToDownload.isNotEmpty()) {
-                            "Download Selected (${selectedRecitersToDownload.size}) • ڈاؤن لوڈ کریں"
+                            "Download Selected (${selectedRecitersToDownload.size})"
                         } else {
-                            "Download All Recitations • سب ڈاؤن لوڈ کریں"
+                            "Download All Recitations"
                         },
                         style = MaterialTheme.typography.labelLarge.copy(
                             fontWeight = FontWeight.Bold,
@@ -742,6 +768,7 @@ fun SurahReaderScreen(
                                 .fillMaxWidth()
                                 .clickable {
                                     viewModel.setSelectedReciter(reciter)
+                                    viewModel.playSurahAudio(surah!!, reciter)
                                     showReciterSelectionSheet = false
                                 }
                         ) {
@@ -760,6 +787,7 @@ fun SurahReaderScreen(
                                         selected = isSelected,
                                         onClick = {
                                             viewModel.setSelectedReciter(reciter)
+                                            viewModel.playSurahAudio(surah!!, reciter)
                                             showReciterSelectionSheet = false
                                         },
                                         colors = RadioButtonDefaults.colors(selectedColor = EmeraldPrimary)
@@ -859,15 +887,34 @@ private fun SurahAudioBottomOverlay(
     surah: Surah,
     selectedReciter: QuranReciter,
     isPlaying: Boolean,
+    isLoading: Boolean = false,
     isCurrentReciterDownloaded: Boolean,
     areAllDownloaded: Boolean,
     downloadedCount: Int,
     totalCount: Int,
+    currentPositionMs: Long = 0L,
+    durationMs: Long = 0L,
+    repeatMode: com.example.audio.AudioRepeatMode = com.example.audio.AudioRepeatMode.OFF,
+    playbackSpeed: Float = 1.0f,
+    isMuted: Boolean = false,
+    onSeekTo: (Long) -> Unit = {},
     onPlayToggle: () -> Unit,
+    onToggleLoop: () -> Unit = {},
+    onChangeSpeed: () -> Unit = {},
+    onToggleMute: () -> Unit = {},
+    onRestartAudio: () -> Unit = {},
     onOpenReciterSelector: () -> Unit,
     onOpenDownloadMenu: () -> Unit,
     onDeleteAll: () -> Unit
 ) {
+    var isDraggingSlider by remember { mutableStateOf(false) }
+    var draggedPositionMs by remember { mutableLongStateOf(0L) }
+    var isExtraControlsExpanded by remember { mutableStateOf(false) }
+
+    val effectivePosition = if (isDraggingSlider) draggedPositionMs else currentPositionMs
+    val effectiveDuration = if (durationMs > 0L) durationMs else 1L
+    val sliderValue = (effectivePosition.toFloat() / effectiveDuration.toFloat()).coerceIn(0f, 1f)
+
     Surface(
         modifier = Modifier
             .fillMaxWidth()
@@ -877,139 +924,315 @@ private fun SurahAudioBottomOverlay(
         shadowElevation = 8.dp,
         border = BorderStroke(AlDeenTokens.CardBorderWidth, MintBorder)
     ) {
-        Row(
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 10.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically
+                .padding(horizontal = 14.dp, vertical = 10.dp)
         ) {
-            // 1. Play / Pause Button (Left Side) - Disabled until current reciter's audio is downloaded!
-            Button(
-                onClick = onPlayToggle,
-                enabled = isCurrentReciterDownloaded,
+            // Upper small player: Play/Pause/Download button on left, slider and timestamps in front, with expandable extra controls
+            Row(
                 modifier = Modifier
-                    .weight(1.1f)
-                    .height(44.dp)
-                    .testTag("reader_play_pause_button"),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = EmeraldPrimary,
+                    .fillMaxWidth()
+                    .animateContentSize(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Play / Pause Button (Left Side) - always plays live with progressive caching
+                Surface(
+                    onClick = onPlayToggle,
+                    modifier = Modifier
+                        .size(42.dp)
+                        .testTag("reader_play_pause_button"),
+                    shape = CircleShape,
+                    color = EmeraldPrimary,
                     contentColor = Color.White,
-                    disabledContainerColor = EmeraldPrimary.copy(alpha = 0.35f),
-                    disabledContentColor = Color.White.copy(alpha = 0.6f)
-                ),
-                shape = AlDeenTokens.ShapePill,
-                contentPadding = PaddingValues(horizontal = 8.dp)
-            ) {
-                Icon(
-                    imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                    contentDescription = if (isPlaying) "Pause" else "Play",
-                    modifier = Modifier.size(18.dp)
-                )
-                Spacer(modifier = Modifier.width(4.dp))
-                Text(
-                    text = if (isPlaying) "Pause" else if (isCurrentReciterDownloaded) "Play" else "Play",
-                    style = MaterialTheme.typography.labelLarge.copy(
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 13.sp
-                    ),
-                    maxLines = 1
-                )
-            }
+                    shadowElevation = 3.dp
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        if (isLoading) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(20.dp),
+                                color = Color.White,
+                                strokeWidth = 2.dp
+                            )
+                        } else {
+                            Icon(
+                                imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                                contentDescription = if (isPlaying) "Pause" else "Play",
+                                tint = Color.White,
+                                modifier = Modifier.size(22.dp)
+                            )
+                        }
+                    }
+                }
 
-            // 2. Reciter Selection Button (Center)
-            OutlinedButton(
-                onClick = onOpenReciterSelector,
-                modifier = Modifier
-                    .weight(1.2f)
-                    .height(44.dp)
-                    .testTag("reader_reciter_select_button"),
-                border = BorderStroke(1.2.dp, EmeraldPrimary.copy(alpha = 0.8f)),
-                colors = ButtonDefaults.outlinedButtonColors(contentColor = EmeraldPrimary),
-                shape = AlDeenTokens.ShapePill,
-                contentPadding = PaddingValues(horizontal = 8.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Default.RecordVoiceOver,
-                    contentDescription = "Select Reciter",
-                    modifier = Modifier.size(16.dp)
-                )
-                Spacer(modifier = Modifier.width(4.dp))
-                Text(
-                    text = selectedReciter.englishName.split(" ").firstOrNull() ?: "Qari",
-                    style = MaterialTheme.typography.labelMedium.copy(
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 11.5.sp
-                    ),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Icon(
-                    imageVector = Icons.Default.ArrowDropDown,
-                    contentDescription = null,
-                    modifier = Modifier.size(16.dp)
-                )
-            }
-
-            // 3. Download / Delete Button (Right Side)
-            // "button tab tak delete mai convert ni krna jab tak sab reciters ki audio download naa ho jaye"
-            if (areAllDownloaded) {
-                // When all reciters are downloaded -> Convert to DELETE button with RED color!
-                Button(
-                    onClick = onDeleteAll,
+                // Slider section: Full width when collapsed, half width when extra controls are expanded
+                Column(
                     modifier = Modifier
                         .weight(1f)
-                        .height(44.dp)
-                        .testTag("reader_delete_all_audios_button"),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = Color(0xFFDC2626), // RED
-                        contentColor = Color.White
-                    ),
-                    shape = AlDeenTokens.ShapePill,
-                    contentPadding = PaddingValues(horizontal = 8.dp)
+                        .padding(start = 8.dp)
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.Delete,
-                        contentDescription = "Delete All Audios",
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text(
-                        text = "Delete",
-                        style = MaterialTheme.typography.labelMedium.copy(
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 12.sp
+                    Slider(
+                        value = sliderValue,
+                        onValueChange = { newVal ->
+                            isDraggingSlider = true
+                            draggedPositionMs = (newVal * effectiveDuration).toLong()
+                        },
+                        onValueChangeFinished = {
+                            isDraggingSlider = false
+                            onSeekTo(draggedPositionMs)
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(24.dp)
+                            .testTag("reader_audio_slider"),
+                        colors = SliderDefaults.colors(
+                            thumbColor = EmeraldPrimary,
+                            activeTrackColor = EmeraldPrimary,
+                            inactiveTrackColor = EmeraldContainer
                         )
                     )
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 4.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = formatAudioDuration(effectivePosition),
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                color = TextSecondary,
+                                fontWeight = FontWeight.SemiBold,
+                                fontSize = 10.sp
+                            )
+                        )
+                        Text(
+                            text = formatAudioDuration(durationMs),
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                color = TextSecondary,
+                                fontWeight = FontWeight.SemiBold,
+                                fontSize = 10.sp
+                            )
+                        )
+                    }
                 }
-            } else {
-                // Download button -> Opens download menu with all reciters & "Download All"
+
+                if (!isExtraControlsExpanded) {
+                    // "<" button at the end of slider to expand extra controls
+                    IconButton(
+                        onClick = { isExtraControlsExpanded = true },
+                        modifier = Modifier
+                            .size(32.dp)
+                            .padding(start = 2.dp)
+                            .testTag("reader_expand_extra_controls_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.ChevronLeft,
+                            contentDescription = "Show extra audio controls",
+                            tint = EmeraldPrimary,
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
+                } else {
+                    // Extra controls taking the other half: Refresh (shuru se lagana), Loop, Speed, Mute/Unmute, and Collapse (>)
+                    Row(
+                        modifier = Modifier
+                            .weight(1.05f)
+                            .padding(start = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        // 1. Refresh / Restart from beginning button
+                        IconButton(
+                            onClick = onRestartAudio,
+                            modifier = Modifier
+                                .size(28.dp)
+                                .testTag("reader_refresh_audio_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Refresh,
+                                contentDescription = "Restart Audio",
+                                tint = EmeraldPrimary,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+
+                        // 2. Loop button
+                        IconButton(
+                            onClick = onToggleLoop,
+                            modifier = Modifier
+                                .size(28.dp)
+                                .testTag("reader_loop_audio_button")
+                        ) {
+                            Icon(
+                                imageVector = if (repeatMode == com.example.audio.AudioRepeatMode.REPEAT_ONE) Icons.Default.RepeatOne else Icons.Default.Repeat,
+                                contentDescription = "Loop Audio",
+                                tint = if (repeatMode != com.example.audio.AudioRepeatMode.OFF) EmeraldPrimary else TextSecondary.copy(alpha = 0.6f),
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+
+                        // 3. Speed button
+                        Surface(
+                            onClick = onChangeSpeed,
+                            shape = RoundedCornerShape(8.dp),
+                            color = EmeraldContainer.copy(alpha = 0.5f),
+                            modifier = Modifier
+                                .height(26.dp)
+                                .testTag("reader_speed_audio_button")
+                        ) {
+                            Box(
+                                contentAlignment = Alignment.Center,
+                                modifier = Modifier.padding(horizontal = 4.dp)
+                            ) {
+                                Text(
+                                    text = "${playbackSpeed}x",
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        fontWeight = FontWeight.Bold,
+                                        color = EmeraldPrimary,
+                                        fontSize = 10.sp
+                                    )
+                                )
+                            }
+                        }
+
+                        // 4. Mute / Unmute button
+                        IconButton(
+                            onClick = onToggleMute,
+                            modifier = Modifier
+                                .size(28.dp)
+                                .testTag("reader_mute_audio_button")
+                        ) {
+                            Icon(
+                                imageVector = if (isMuted) Icons.Default.VolumeOff else Icons.Default.VolumeUp,
+                                contentDescription = if (isMuted) "Unmute" else "Mute",
+                                tint = if (isMuted) Color(0xFFE53935) else EmeraldPrimary,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+
+                        // 5. Collapse button (">" chevron right to close)
+                        IconButton(
+                            onClick = { isExtraControlsExpanded = false },
+                            modifier = Modifier
+                                .size(26.dp)
+                                .testTag("reader_collapse_extra_controls_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.ChevronRight,
+                                contentDescription = "Hide extra controls",
+                                tint = TextSecondary,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            // Lower row with the 2 buttons: Reciter Selection and Download / Delete
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // 1. Reciter Selection Button
                 OutlinedButton(
-                    onClick = onOpenDownloadMenu,
+                    onClick = onOpenReciterSelector,
                     modifier = Modifier
                         .weight(1f)
                         .height(44.dp)
-                        .testTag("reader_download_menu_button"),
-                    border = BorderStroke(1.2.dp, EmeraldPrimary),
+                        .testTag("reader_reciter_select_button"),
+                    border = BorderStroke(1.2.dp, EmeraldPrimary.copy(alpha = 0.8f)),
                     colors = ButtonDefaults.outlinedButtonColors(contentColor = EmeraldPrimary),
                     shape = AlDeenTokens.ShapePill,
                     contentPadding = PaddingValues(horizontal = 8.dp)
                 ) {
                     Icon(
-                        imageVector = Icons.Default.Download,
-                        contentDescription = "Download Audios",
-                        tint = EmeraldPrimary,
+                        imageVector = Icons.Default.RecordVoiceOver,
+                        contentDescription = "Select Reciter",
                         modifier = Modifier.size(16.dp)
                     )
-                    Spacer(modifier = Modifier.width(4.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
                     Text(
-                        text = if (downloadedCount > 0) "$downloadedCount/$totalCount" else "Download",
+                        text = selectedReciter.englishName.split(" ").firstOrNull() ?: "Qari",
                         style = MaterialTheme.typography.labelMedium.copy(
                             fontWeight = FontWeight.Bold,
-                            fontSize = 11.5.sp,
-                            color = EmeraldPrimary
-                        )
+                            fontSize = 12.sp
+                        ),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
+                    Spacer(modifier = Modifier.width(2.dp))
+                    Icon(
+                        imageVector = Icons.Default.ArrowDropDown,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+
+                // 2. Download / Delete Button
+                if (areAllDownloaded) {
+                    // When all reciters are downloaded -> Convert to DELETE button with RED color!
+                    Button(
+                        onClick = onDeleteAll,
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(44.dp)
+                            .testTag("reader_delete_all_audios_button"),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color(0xFFDC2626), // RED
+                            contentColor = Color.White
+                        ),
+                        shape = AlDeenTokens.ShapePill,
+                        contentPadding = PaddingValues(horizontal = 8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Delete,
+                            contentDescription = "Delete All Audios",
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "Delete Audio",
+                            style = MaterialTheme.typography.labelMedium.copy(
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 12.sp
+                            )
+                        )
+                    }
+                } else {
+                    // Download button -> Opens download menu with all reciters & "Download All"
+                    OutlinedButton(
+                        onClick = onOpenDownloadMenu,
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(44.dp)
+                            .testTag("reader_download_menu_button"),
+                        border = BorderStroke(1.2.dp, EmeraldPrimary),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = EmeraldPrimary),
+                        shape = AlDeenTokens.ShapePill,
+                        contentPadding = PaddingValues(horizontal = 8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Download,
+                            contentDescription = "Download Audios",
+                            tint = EmeraldPrimary,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = if (downloadedCount > 0) "$downloadedCount/$totalCount" else "Download Audio",
+                            style = MaterialTheme.typography.labelMedium.copy(
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 12.sp,
+                                color = EmeraldPrimary
+                            ),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
                 }
             }
         }

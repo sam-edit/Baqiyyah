@@ -1,5 +1,6 @@
 package com.example.ui.hadith
 
+import androidx.compose.animation.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -39,6 +40,7 @@ fun BaabListScreen(
 ) {
     val book by viewModel.selectedBook.collectAsStateWithLifecycle()
     val chapters by viewModel.chapters.collectAsStateWithLifecycle()
+    val isChaptersLoading by viewModel.isChaptersLoading.collectAsStateWithLifecycle()
     val isTranslationEnabled by viewModel.isTranslationEnabled.collectAsStateWithLifecycle()
     val downloadStatusMap by viewModel.downloadStatusMap.collectAsStateWithLifecycle()
 
@@ -106,158 +108,201 @@ fun BaabListScreen(
         },
         modifier = modifier.testTag("baab_list_screen")
     ) { innerPadding ->
-        LazyColumn(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding)
-                .background(MaterialTheme.colorScheme.background)
-                .padding(horizontal = AlDeenTokens.SpacingLarge),
-            contentPadding = PaddingValues(vertical = AlDeenTokens.SpacingMedium),
-            verticalArrangement = Arrangement.spacedBy(AlDeenTokens.SpacingSmall)
-        ) {
-            // If book is not downloaded, display prominent download prompt at the top
-            if (!isBookDownloaded) {
-                item {
-                    Card(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(bottom = 12.dp),
-                        shape = AlDeenTokens.ShapeCard,
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.2f)),
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.5f))
+        AnimatedContent(
+            targetState = isChaptersLoading || chapters.isEmpty(),
+            transitionSpec = { fadeIn() togetherWith fadeOut() },
+            label = "chapters_loading_state"
+        ) { loading ->
+            if (loading) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(innerPadding)
+                        .background(MaterialTheme.colorScheme.background),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center,
+                        modifier = Modifier.padding(24.dp)
                     ) {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(16.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally
-                        ) {
-                            Text(
-                                text = "Download Required",
-                                style = MaterialTheme.typography.titleSmall.copy(
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.error
-                                )
-                            )
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(
-                                text = "To read all chapters and ahadith, please download this book first.",
-                                style = MaterialTheme.typography.bodySmall.copy(color = TextPrimary)
-                            )
-                            Spacer(modifier = Modifier.height(10.dp))
-
-                            if (bookDownloadState is HadithDownloadState.Downloading) {
+                        CircularProgressIndicator(
+                            color = EmeraldPrimary,
+                            strokeWidth = 3.dp,
+                            modifier = Modifier.size(44.dp)
+                        )
+                        Spacer(modifier = Modifier.height(16.dp))
+                        AlDeenText(
+                            text = "ابواب لوڈ ہو رہے ہیں...",
+                            style = AlDeenTypography.UrduBody.copy(
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = EmeraldPrimary
+                            ),
+                            targetScript = ScriptLanguage.URDU
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = "Loading Chapters...",
+                            style = MaterialTheme.typography.bodySmall.copy(color = TextSecondary)
+                        )
+                    }
+                }
+            } else {
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(innerPadding)
+                        .background(MaterialTheme.colorScheme.background)
+                        .padding(horizontal = AlDeenTokens.SpacingLarge),
+                    contentPadding = PaddingValues(vertical = AlDeenTokens.SpacingMedium),
+                    verticalArrangement = Arrangement.spacedBy(AlDeenTokens.SpacingSmall)
+                ) {
+                    // If book is not downloaded, display prominent download prompt at the top
+                    if (!isBookDownloaded) {
+                        item {
+                            Card(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(bottom = 12.dp),
+                                shape = AlDeenTokens.ShapeCard,
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.2f)),
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.5f))
+                            ) {
                                 Column(
-                                    horizontalAlignment = Alignment.CenterHorizontally,
-                                    modifier = Modifier.fillMaxWidth()
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(16.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally
                                 ) {
-                                    LinearProgressIndicator(
-                                        progress = { bookDownloadState.progress },
-                                        modifier = Modifier.fillMaxWidth().height(5.dp).clip(AlDeenTokens.ShapePill),
-                                        color = EmeraldPrimary,
-                                        trackColor = EmeraldContainer
+                                    Text(
+                                        text = "Download Required",
+                                        style = MaterialTheme.typography.titleSmall.copy(
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.error
+                                        )
                                     )
                                     Spacer(modifier = Modifier.height(4.dp))
                                     Text(
-                                        text = "Downloading ${(bookDownloadState.progress * 100).toInt()}%",
-                                        style = MaterialTheme.typography.labelSmall.copy(
-                                            color = EmeraldPrimary,
-                                            fontWeight = FontWeight.Bold
-                                        )
+                                        text = "To read all chapters and ahadith, please download this book first.",
+                                        style = MaterialTheme.typography.bodySmall.copy(color = TextPrimary)
                                     )
-                                }
-                            } else {
-                                Button(
-                                    onClick = { viewModel.downloadBook(book.slug) },
-                                    shape = AlDeenTokens.ShapePill,
-                                    colors = ButtonDefaults.buttonColors(containerColor = EmeraldPrimary)
-                                ) {
-                                    Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(16.dp))
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text("Download Now")
+                                    Spacer(modifier = Modifier.height(10.dp))
+
+                                    if (bookDownloadState is HadithDownloadState.Downloading) {
+                                        Column(
+                                            horizontalAlignment = Alignment.CenterHorizontally,
+                                            modifier = Modifier.fillMaxWidth()
+                                        ) {
+                                            LinearProgressIndicator(
+                                                progress = { bookDownloadState.progress },
+                                                modifier = Modifier.fillMaxWidth().height(5.dp).clip(AlDeenTokens.ShapePill),
+                                                color = EmeraldPrimary,
+                                                trackColor = EmeraldContainer
+                                            )
+                                            Spacer(modifier = Modifier.height(4.dp))
+                                            Text(
+                                                text = "Downloading ${(bookDownloadState.progress * 100).toInt()}%",
+                                                style = MaterialTheme.typography.labelSmall.copy(
+                                                    color = EmeraldPrimary,
+                                                    fontWeight = FontWeight.Bold
+                                                )
+                                            )
+                                        }
+                                    } else {
+                                        Button(
+                                            onClick = { viewModel.downloadBook(book.slug) },
+                                            shape = AlDeenTokens.ShapePill,
+                                            colors = ButtonDefaults.buttonColors(containerColor = EmeraldPrimary)
+                                        ) {
+                                            Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(16.dp))
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Text("Download Now")
+                                        }
+                                    }
                                 }
                             }
                         }
                     }
-                }
-            }
 
-            items(chapters) { chapter ->
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(AlDeenTokens.ShapeCard)
-                        .clickable {
-                            viewModel.selectChapter(chapter)
-                            onChapterSelected(chapter)
-                        }
-                        .testTag("chapter_item_${chapter.chapterNumber}"),
-                    shape = AlDeenTokens.ShapeCard,
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                    border = BorderStroke(AlDeenTokens.CardBorderWidth, MintBorder)
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 14.dp, vertical = 14.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            // Chapter Number
-                            Surface(
-                                shape = CircleShape,
-                                color = EmeraldContainer,
-                                modifier = Modifier.size(38.dp)
-                            ) {
-                                Box(contentAlignment = Alignment.Center) {
-                                    Text(
-                                        text = "${chapter.chapterNumber}",
-                                        style = MaterialTheme.typography.labelSmall.copy(
-                                            fontWeight = FontWeight.Bold,
-                                            color = OnEmeraldContainer
-                                        )
-                                    )
+                    items(chapters) { chapter ->
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(AlDeenTokens.ShapeCard)
+                                .clickable {
+                                    viewModel.selectChapter(chapter)
+                                    onChapterSelected(chapter)
                                 }
-                            }
+                                .testTag("chapter_item_${chapter.chapterNumber}"),
+                            shape = AlDeenTokens.ShapeCard,
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                            border = BorderStroke(AlDeenTokens.CardBorderWidth, MintBorder)
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 14.dp, vertical = 14.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    // Chapter Number
+                                    Surface(
+                                        shape = CircleShape,
+                                        color = EmeraldContainer,
+                                        modifier = Modifier.size(38.dp)
+                                    ) {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            Text(
+                                                text = "${chapter.chapterNumber}",
+                                                style = MaterialTheme.typography.labelSmall.copy(
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = OnEmeraldContainer
+                                                )
+                                            )
+                                        }
+                                    }
 
-                            Spacer(modifier = Modifier.width(14.dp))
+                                    Spacer(modifier = Modifier.width(14.dp))
 
-                            Column(modifier = Modifier.weight(1f)) {
-                                AlDeenText(
-                                    text = chapter.arabicTitle.ifBlank { "كتاب ${chapter.chapterNumber}" },
-                                    style = AlDeenTypography.ArabicHadithSmall.copy(
-                                        fontSize = 16.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = TextPrimary,
-                                        lineHeight = 24.sp
-                                    ),
-                                    targetScript = ScriptLanguage.ARABIC,
-                                    maxLines = 2,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                                Spacer(modifier = Modifier.height(4.dp))
-                                Text(
-                                    text = chapter.englishTitle.ifBlank { chapter.urduTitle.ifBlank { "Chapter ${chapter.chapterNumber}" } },
-                                    style = MaterialTheme.typography.bodySmall.copy(
-                                        fontWeight = FontWeight.Normal,
-                                        color = TextSecondary
-                                    ),
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        AlDeenText(
+                                            text = chapter.arabicTitle.ifBlank { "كتاب ${chapter.chapterNumber}" },
+                                            style = AlDeenTypography.ArabicHadithSmall.copy(
+                                                fontSize = 16.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = TextPrimary,
+                                                lineHeight = 24.sp
+                                            ),
+                                            targetScript = ScriptLanguage.ARABIC,
+                                            maxLines = 2,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                        Text(
+                                            text = chapter.englishTitle.ifBlank { chapter.urduTitle.ifBlank { "Chapter ${chapter.chapterNumber}" } },
+                                            style = MaterialTheme.typography.bodySmall.copy(
+                                                fontWeight = FontWeight.Normal,
+                                                color = TextSecondary
+                                            ),
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                }
+
+                                Icon(
+                                    imageVector = Icons.Default.ChevronRight,
+                                    contentDescription = null,
+                                    tint = EmeraldPrimary,
+                                    modifier = Modifier.size(20.dp)
                                 )
                             }
                         }
-
-                        Icon(
-                            imageVector = Icons.Default.ChevronRight,
-                            contentDescription = null,
-                            tint = EmeraldPrimary,
-                            modifier = Modifier.size(20.dp)
-                        )
                     }
                 }
             }

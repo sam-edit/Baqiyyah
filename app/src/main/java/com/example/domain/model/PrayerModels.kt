@@ -57,7 +57,9 @@ data class UserLocation(
     val countryName: String,
     val latitude: Double,
     val longitude: Double,
-    val isAutoDetected: Boolean = false
+    val isAutoDetected: Boolean = false,
+    /** IANA zone id (e.g. "Asia/Karachi") when known; null falls back to name-based lookup. */
+    val timeZoneId: String? = null
 )
 
 enum class CalculationMethod(val id: Int, val methodName: String, val displayName: String = methodName) {
@@ -122,6 +124,42 @@ fun getRecommendedSchoolForLocation(country: String, city: String = ""): Juristi
     return when {
         c.contains("saudi") || c.contains("emirates") || c.contains("uae") || c.contains("egypt") || c.contains("jordan") || c.contains("oman") || c.contains("kuwait") || c.contains("qatar") || c.contains("malaysia") || c.contains("indonesia") -> JuristicSchool.STANDARD
         else -> JuristicSchool.HANAFI
+    }
+}
+
+enum class PrayerAlertType(
+    val id: String,
+    val displayName: String,
+    val urduName: String,
+    val description: String,
+    val durationSeconds: Int
+) {
+    LIGHT(
+        id = "light",
+        displayName = "Light",
+        urduName = "لائٹ (معمول)",
+        description = "Standard notification in notification bar",
+        durationSeconds = 0
+    ),
+    MEDIUM(
+        id = "medium",
+        displayName = "Medium",
+        urduName = "میڈیم (درمیانہ)",
+        description = "Full screen alert (5s) with vibration & audio",
+        durationSeconds = 5
+    ),
+    STRONG(
+        id = "strong",
+        displayName = "Strong",
+        urduName = "اسٹرانگ (مضبوط)",
+        description = "Full screen alert (10s) with active vibration & audio",
+        durationSeconds = 10
+    );
+
+    companion object {
+        fun fromId(id: String?): PrayerAlertType {
+            return values().firstOrNull { it.id.equals(id, ignoreCase = true) } ?: LIGHT
+        }
     }
 }
 

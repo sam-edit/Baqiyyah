@@ -50,6 +50,7 @@ fun HadithReaderScreen(
     val book by viewModel.selectedBook.collectAsStateWithLifecycle()
     val chapter by viewModel.selectedChapter.collectAsStateWithLifecycle()
     val hadiths by viewModel.hadithsForChapter.collectAsStateWithLifecycle()
+    val isHadithsLoading by viewModel.isHadithsLoading.collectAsStateWithLifecycle()
     val isTranslationEnabled by viewModel.isTranslationEnabled.collectAsStateWithLifecycle()
     val selectedLangCode by viewModel.selectedLanguageCode.collectAsStateWithLifecycle()
     val langStatusMap by viewModel.languageDownloadStatusMap.collectAsStateWithLifecycle()
@@ -99,9 +100,13 @@ fun HadithReaderScreen(
     val isLanguageDownloaded = langState is HadithDownloadState.Downloaded
     val isLanguageDownloading = langState is HadithDownloadState.Downloading
 
+    val onlineLoadingKeys by viewModel.onlineLoadingKeys.collectAsStateWithLifecycle()
+    val isOnlineLoading = onlineLoadingKeys.contains("${book.slug}_${viewModel.downloadManager.normalizeLang(selectedLangCode)}")
+
+    // No auto-download: if the selected language is not downloaded, fetch it via API for viewing only
     LaunchedEffect(selectedLangCode, book.slug, isLanguageDownloaded, isLanguageDownloading) {
-        if (!isLanguageDownloaded && !isLanguageDownloading && (selectedLangCode in listOf("urd", "ur"))) {
-            viewModel.downloadLanguage(book.slug, selectedLangCode)
+        if (!isLanguageDownloaded && !isLanguageDownloading && selectedLangCode !in listOf("ara", "ar")) {
+            viewModel.fetchLanguageOnline(book.slug, selectedLangCode)
         }
     }
 
@@ -251,7 +256,7 @@ fun HadithReaderScreen(
 
             // Language download status banner at the top if needed
             if (isTranslationEnabled && selectedLangCode !in listOf("ara", "ar")) {
-                if (isLanguageDownloading) {
+                if (isLanguageDownloading || isOnlineLoading) {
                     item {
                         Card(
                             modifier = Modifier
@@ -272,7 +277,7 @@ fun HadithReaderScreen(
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     AlDeenText(
-                                        text = "ترجمہ ڈاؤن لوڈ ہو رہا ہے ($activeLanguageName)...",
+                                        text = if (isLanguageDownloading) "($activeLanguageName)... Translation is Downloading" else "($activeLanguageName)... Loading translation",
                                         style = MaterialTheme.typography.labelMedium.copy(
                                             color = EmeraldPrimary,
                                             fontWeight = FontWeight.SemiBold
@@ -322,7 +327,7 @@ fun HadithReaderScreen(
                                 ) {
                                     Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(14.dp))
                                     Spacer(modifier = Modifier.width(4.dp))
-                                    AlDeenText("ڈاؤن لوڈ", fontSize = 11.5.sp)
+                                    AlDeenText("Download", fontSize = 11.5.sp)
                                 }
                             }
                         }
@@ -348,14 +353,15 @@ fun HadithReaderScreen(
                                 .padding(24.dp),
                             horizontalAlignment = Alignment.CenterHorizontally
                         ) {
-                            if (isDownloading) {
+                            if (isHadithsLoading || isDownloading) {
                                 CircularProgressIndicator(
                                     color = EmeraldPrimary,
-                                    modifier = Modifier.size(36.dp)
+                                    strokeWidth = 3.dp,
+                                    modifier = Modifier.size(38.dp)
                                 )
                                 Spacer(modifier = Modifier.height(16.dp))
                                 AlDeenText(
-                                    text = "احادیث مبارکہ ڈاؤنلوڈ ہو رہی ہیں...",
+                                    text = if (isDownloading) "Hadiths are Downloading..." else "Hadiths are Loading...",
                                     style = AlDeenTypography.UrduBody.copy(
                                         fontSize = 15.sp,
                                         fontWeight = FontWeight.Bold,
@@ -364,8 +370,8 @@ fun HadithReaderScreen(
                                     targetScript = ScriptLanguage.URDU
                                 )
                                 Spacer(modifier = Modifier.height(6.dp))
-                                AlDeenText(
-                                    text = "Please wait a moment while the authentic collection is loaded.",
+                                Text(
+                                    text = if (isDownloading) "Please wait while the authentic collection is downloaded." else "Loading Ahadith...",
                                     style = MaterialTheme.typography.bodySmall.copy(color = TextSecondary)
                                 )
                             } else {
@@ -394,7 +400,7 @@ fun HadithReaderScreen(
                                         Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(18.dp))
                                         Spacer(modifier = Modifier.width(8.dp))
                                         AlDeenText(
-                                            text = "کتاب ڈاؤنلوڈ کریں (${book.urduName})",
+                                            text = "Download (${book.urduName}) Book",
                                             style = AlDeenTypography.UrduBody.copy(color = Color.White),
                                             targetScript = ScriptLanguage.URDU
                                         )
@@ -421,8 +427,9 @@ fun HadithReaderScreen(
                     isTranslationEnabled = isTranslationEnabled,
                     isLanguageDownloaded = isLanguageDownloaded,
                     isLanguageDownloading = isLanguageDownloading,
+                    isBookDownloaded = isBookDownloaded,
                     selectedLangCode = selectedLangCode,
-                    activeLanguageName = activeLanguage?.nativeName ?: "ترجمہ",
+                    activeLanguageName = activeLanguage?.nativeName ?: "Translation",
                     arabicFontSize = arabicFontSize,
                     transFontSize = transFontSize,
                     isHighlighted = isTarget,
@@ -465,6 +472,7 @@ private fun HadithDetailCard(
     isTranslationEnabled: Boolean,
     isLanguageDownloaded: Boolean,
     isLanguageDownloading: Boolean,
+    isBookDownloaded: Boolean = true,
     selectedLangCode: String,
     activeLanguageName: String,
     arabicFontSize: Float = 22f,
@@ -580,30 +588,53 @@ private fun HadithDetailCard(
             // Translation Section (Displayed directly below Arabic text)
             if (isTranslationEnabled) {
                 val isUrduSelected = selectedLangCode in listOf("urd", "ur")
-                val translationText = when {
-                    isUrduSelected -> {
-                        when {
-                            hadith.activeTranslation.isNotBlank() && UrduHadithSupplement.hasUrduScript(hadith.activeTranslation) -> hadith.activeTranslation
-                            hadith.urduTranslation.isNotBlank() && UrduHadithSupplement.hasUrduScript(hadith.urduTranslation) -> hadith.urduTranslation
-                            else -> ""
-                        }
-                    }
-                    selectedLangCode in listOf("eng", "en") && hadith.englishTranslation.isNotBlank() -> hadith.englishTranslation
-                    hadith.activeTranslation.isNotBlank() -> hadith.activeTranslation
-                    hadith.urduTranslation.isNotBlank() -> hadith.urduTranslation
-                    hadith.englishTranslation.isNotBlank() -> hadith.englishTranslation
+                val isEnglishSelected = selectedLangCode in listOf("eng", "en")
+
+                // Robust translation resolution:
+                // 1. If Urdu selected: try activeTranslation (if Urdu script), then urduTranslation (if Urdu script), then supplement
+                //    If still empty (e.g. scraper had no Urdu translation for this sanad/hadith), fallback to englishTranslation
+                // 2. If English selected: try englishTranslation, activeTranslation, urduTranslation
+                // 3. For any other language: try activeTranslation, englishTranslation, urduTranslation
+                val urduSupplement = UrduHadithSupplement.getTranslation(hadith.bookSlug, hadith.hadithNumber)
+                val resolvedUrdu = when {
+                    hadith.activeTranslation.isNotBlank() && UrduHadithSupplement.hasUrduScript(hadith.activeTranslation) -> hadith.activeTranslation
+                    hadith.urduTranslation.isNotBlank() && UrduHadithSupplement.hasUrduScript(hadith.urduTranslation) -> hadith.urduTranslation
+                    !urduSupplement.isNullOrBlank() -> urduSupplement
                     else -> ""
                 }
 
-                val isDuplicate = !hasArabic && ((selectedLangCode in listOf("urd", "ur") && hadith.urduTranslation.isNotBlank()) ||
-                        (selectedLangCode in listOf("eng", "en") && hadith.englishTranslation.isNotBlank() && hadith.urduTranslation.isBlank()))
+                val translationText = when {
+                    isUrduSelected -> {
+                        if (resolvedUrdu.isNotBlank()) resolvedUrdu
+                        else if (hadith.englishTranslation.isNotBlank()) hadith.englishTranslation
+                        else hadith.activeTranslation
+                    }
+                    isEnglishSelected -> {
+                        if (hadith.englishTranslation.isNotBlank()) hadith.englishTranslation
+                        else if (hadith.activeTranslation.isNotBlank()) hadith.activeTranslation
+                        else resolvedUrdu
+                    }
+                    else -> {
+                        when {
+                            hadith.activeTranslation.isNotBlank() -> hadith.activeTranslation
+                            resolvedUrdu.isNotBlank() -> resolvedUrdu
+                            hadith.englishTranslation.isNotBlank() -> hadith.englishTranslation
+                            else -> ""
+                        }
+                    }
+                }
+
+                val isDuplicate = !hasArabic && (
+                    (isUrduSelected && translationText == hadith.urduTranslation) ||
+                    (isEnglishSelected && translationText == hadith.englishTranslation && hadith.urduTranslation.isBlank())
+                )
 
                 if (translationText.isNotBlank() && !isDuplicate) {
-                    val isUrduText = isUrduSelected || (translationText == hadith.urduTranslation) || UrduHadithSupplement.hasUrduScript(translationText)
+                    val isUrduText = UrduHadithSupplement.hasUrduScript(translationText)
                     val isRtlLanguage = isUrduText || selectedLangCode in listOf("ara", "ar")
                     val displayLangLabel = when {
-                        isUrduSelected || isUrduText -> "اردو"
-                        translationText == hadith.englishTranslation && selectedLangCode !in listOf("eng", "en") -> "English"
+                        isUrduText -> "اردو"
+                        translationText == hadith.englishTranslation -> "English"
                         else -> activeLanguageName
                     }
 
@@ -617,14 +648,37 @@ private fun HadithDetailCard(
                             .background(EmeraldContainer.copy(alpha = 0.25f), AlDeenTokens.ShapeCard)
                             .padding(12.dp)
                     ) {
-                        AlDeenText(
-                            text = "ترجمہ ($displayLangLabel):",
-                            style = MaterialTheme.typography.labelSmall.copy(
-                                fontWeight = FontWeight.Bold,
-                                color = EmeraldPrimary,
-                                fontSize = 12.sp
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            AlDeenText(
+                                text = "ترجمہ ($displayLangLabel):",
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    color = EmeraldPrimary,
+                                    fontSize = 12.sp
+                                )
                             )
-                        )
+                            if (isUrduSelected && !isUrduText && translationText == hadith.englishTranslation) {
+                                Surface(
+                                    shape = AlDeenTokens.ShapePill,
+                                    color = GoldAccent.copy(alpha = 0.15f),
+                                    border = BorderStroke(0.6.dp, GoldAccent.copy(alpha = 0.5f))
+                                ) {
+                                    Text(
+                                        text = "English Fallback",
+                                        style = MaterialTheme.typography.labelSmall.copy(
+                                            color = GoldAccent,
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.Medium
+                                        ),
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                    )
+                                }
+                            }
+                        }
                         Spacer(modifier = Modifier.height(6.dp))
                         AlDeenText(
                             text = translationText,
@@ -645,6 +699,38 @@ private fun HadithDetailCard(
                             textAlign = if (isRtlLanguage) androidx.compose.ui.text.style.TextAlign.End else androidx.compose.ui.text.style.TextAlign.Start,
                             modifier = Modifier.fillMaxWidth()
                         )
+                    }
+                } else if (!isLanguageDownloaded && !isLanguageDownloading && isBookDownloaded && selectedLangCode !in listOf("ara", "ar")) {
+                    // Translation is not yet downloaded on device for this hadith card
+                    Spacer(modifier = Modifier.height(12.dp))
+                    HorizontalDivider(color = MintBorder.copy(alpha = 0.5f), thickness = 0.8.dp)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onDownloadLanguage() },
+                        shape = AlDeenTokens.ShapeCard,
+                        color = EmeraldContainer.copy(alpha = 0.2f),
+                        border = BorderStroke(0.8.dp, MintBorder.copy(alpha = 0.6f))
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            AlDeenText(
+                                text = "اس حدیث کا ترجمہ دیکھنے کے لیے ڈاؤن لوڈ کریں ($activeLanguageName)",
+                                style = MaterialTheme.typography.labelSmall.copy(color = TextSecondary, fontSize = 11.5.sp)
+                            )
+                            Icon(
+                                imageVector = Icons.Default.Download,
+                                contentDescription = "Download Translation",
+                                tint = EmeraldPrimary,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
                     }
                 }
             }

@@ -1,9 +1,10 @@
 package com.example.ui.components
 
-import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.togetherWith
+import androidx.compose.animation.*
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -19,6 +20,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
@@ -108,16 +110,28 @@ fun HomeMomentSection(
         ) {
             MomentType.entries.forEach { type ->
                 val isSelected = selectedMoment == type
+                val tabBgColor by animateColorAsState(
+                    targetValue = if (isSelected) EmeraldPrimary else Color.Transparent,
+                    animationSpec = tween(220, easing = FastOutSlowInEasing),
+                    label = "moment_tab_bg_${type.name}"
+                )
+                val tabContentColor by animateColorAsState(
+                    targetValue = if (isSelected) Color.White else TextSecondary,
+                    animationSpec = tween(220, easing = FastOutSlowInEasing),
+                    label = "moment_tab_content_${type.name}"
+                )
+
                 Surface(
                     onClick = {
                         selectedMoment = type
                         onRefreshMoment(type)
                     },
                     shape = RoundedCornerShape(10.dp),
-                    color = if (isSelected) EmeraldPrimary else Color.Transparent,
+                    color = tabBgColor,
                     modifier = Modifier
                         .weight(1f)
                         .height(38.dp)
+                        .pressScaleEffect(0.95f)
                         .testTag("moment_menu_tab_${type.name.lowercase()}")
                 ) {
                     Row(
@@ -130,7 +144,7 @@ fun HomeMomentSection(
                         Icon(
                             imageVector = type.icon,
                             contentDescription = type.label,
-                            tint = if (isSelected) Color.White else TextSecondary,
+                            tint = tabContentColor,
                             modifier = Modifier.size(15.dp)
                         )
                         Spacer(modifier = Modifier.width(4.dp))
@@ -138,7 +152,7 @@ fun HomeMomentSection(
                             text = type.label,
                             style = MaterialTheme.typography.labelMedium.copy(
                                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                color = if (isSelected) Color.White else TextSecondary,
+                                color = tabContentColor,
                                 fontSize = 12.sp
                             ),
                             maxLines = 1
@@ -153,7 +167,26 @@ fun HomeMomentSection(
         // 7. Home Moment Content: Switches smoothly showing ONLY one item at a time
         AnimatedContent(
             targetState = selectedMoment,
-            transitionSpec = { fadeIn() togetherWith fadeOut() },
+            transitionSpec = {
+                val direction = if (targetState.ordinal >= initialState.ordinal) {
+                    AnimatedContentTransitionScope.SlideDirection.Start
+                } else {
+                    AnimatedContentTransitionScope.SlideDirection.End
+                }
+                (slideIntoContainer(
+                    towards = direction,
+                    animationSpec = tween(260, easing = FastOutSlowInEasing),
+                    initialOffset = { it / 8 }
+                ) + fadeIn(animationSpec = tween(220, easing = FastOutSlowInEasing)) +
+                 scaleIn(initialScale = 0.98f, animationSpec = tween(260, easing = FastOutSlowInEasing)))
+                    .togetherWith(
+                        slideOutOfContainer(
+                            towards = direction,
+                            animationSpec = tween(200, easing = FastOutSlowInEasing),
+                            targetOffset = { -it / 8 }
+                        ) + fadeOut(animationSpec = tween(180, easing = FastOutSlowInEasing))
+                    )
+            },
             label = "moment_content_anim"
         ) { currentMoment ->
             when (currentMoment) {
@@ -245,20 +278,42 @@ private fun AyahMomentCard(
                 }
 
                 Row(verticalAlignment = Alignment.CenterVertically) {
+                    var isRefreshing by remember { mutableStateOf(false) }
+                    val refreshRotation by animateFloatAsState(
+                        targetValue = if (isRefreshing) 360f else 0f,
+                        animationSpec = tween(400, easing = FastOutSlowInEasing),
+                        label = "ayah_refresh_rot",
+                        finishedListener = { isRefreshing = false }
+                    )
+
                     // Refresh Button
                     IconButton(
-                        onClick = onRefresh,
+                        onClick = {
+                            isRefreshing = true
+                            onRefresh()
+                        },
                         modifier = Modifier.size(36.dp)
                     ) {
                         Icon(
                             imageVector = Icons.Default.Refresh,
                             contentDescription = "Random Ayah",
                             tint = TextSecondary,
-                            modifier = Modifier.size(18.dp)
+                            modifier = Modifier
+                                .size(18.dp)
+                                .graphicsLayer { rotationZ = refreshRotation }
                         )
                     }
 
-                    // Audio Play
+                    // Equalizer + Audio Play
+                    if (isPlayingAudio) {
+                        AnimatedEqualizer(
+                            isPlaying = true,
+                            modifier = Modifier.padding(end = 4.dp),
+                            color = EmeraldPrimary,
+                            barCount = 3
+                        )
+                    }
+
                     IconButton(
                         onClick = {
                             ayah.audioUrl?.let { onPlayAudio(it, "ayah_moment_${ayah.number}") }
@@ -273,7 +328,18 @@ private fun AyahMomentCard(
                         )
                     }
 
-                    // Bookmark
+                    // Bookmark with bounce spring and color animation
+                    val bookmarkScale by animateFloatAsState(
+                        targetValue = if (bookmarked) 1.22f else 1.0f,
+                        animationSpec = spring(dampingRatio = 0.55f, stiffness = 420f),
+                        label = "ayah_bookmark_scale"
+                    )
+                    val bookmarkColor by animateColorAsState(
+                        targetValue = if (bookmarked) GoldAccent else TextSecondary,
+                        animationSpec = tween(220),
+                        label = "ayah_bookmark_color"
+                    )
+
                     IconButton(
                         onClick = {
                             onToggleBookmark(
@@ -292,8 +358,13 @@ private fun AyahMomentCard(
                         Icon(
                             imageVector = if (bookmarked) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
                             contentDescription = if (bookmarked) "Remove bookmark" else "Add to bookmarks",
-                            tint = if (bookmarked) GoldAccent else TextSecondary,
-                            modifier = Modifier.size(24.dp)
+                            tint = bookmarkColor,
+                            modifier = Modifier
+                                .size(24.dp)
+                                .graphicsLayer {
+                                    scaleX = bookmarkScale
+                                    scaleY = bookmarkScale
+                                }
                         )
                     }
                 }
@@ -368,7 +439,7 @@ private fun HadeethMomentCard(
                         )
                     )
                     AlDeenText(
-                        text = if (isNotDownloaded) "کوئی کتاب ڈاؤن لوڈ نہیں" else "${hadith.bookName} • Hadith #${hadith.hadithNumber}",
+                        text = if (isNotDownloaded) "Books are not Downloaded" else "${hadith.bookName} • Hadith #${hadith.hadithNumber}",
                         style = MaterialTheme.typography.bodyMedium.copy(
                             fontWeight = FontWeight.SemiBold,
                             color = TextPrimary,

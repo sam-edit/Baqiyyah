@@ -32,15 +32,107 @@ class QuranViewModel(application: Application) : AndroidViewModel(application) {
     val quranRepository = QuranRepository(application)
     private val database = AlDeenDatabase.getInstance(application)
     val bookmarksRepository = BookmarksRepository(database.bookmarkDao())
-    val audioPlayer = QuranAudioPlayer(application)
+    val audioPlayer = QuranAudioPlayer.getInstance(application)
     val audioDownloadManager = QuranAudioDownloadManager(application)
     val translationManager = com.example.data.quran.QuranTranslationManager.getInstance(application)
+    val recentAudioRepository = com.example.data.repository.QuranRecentAudioRepository(application)
 
-    // Navigation state: Tracks whether "Al Quran" full section (Surah/Juz list) is open
+    // Recent Audio Surahs
+    val recentAudioSurahs: StateFlow<List<com.example.domain.model.RecentAudioSurah>> = recentAudioRepository.recentAudioSurahs
+
+    // Selected Audio Surah Number for Floating Player (defaults to last listened or 1)
+    private val _selectedAudioSurahNumber = MutableStateFlow(
+        recentAudioRepository.getLastPlayedSurah()?.surahNumber ?: 1
+    )
+    val selectedAudioSurahNumber: StateFlow<Int> = _selectedAudioSurahNumber.asStateFlow()
+
+    // Floating Audio Player UI States (closed by default; shows headphone FAB button)
+    val isFloatingAudioPlayerVisible = MutableStateFlow(false)
+    val isFloatingAudioPlayerExpanded = MutableStateFlow(true)
+    val isRecentAudioBottomSheetOpen = MutableStateFlow(false)
+    val isSurahPickerBottomSheetOpen = MutableStateFlow(false)
+    val isReciterAudioBottomSheetOpen = MutableStateFlow(false)
+
+    // Expose Audio Player states
+    val audioCurrentPositionMs: StateFlow<Long> = audioPlayer.currentPositionMs
+    val audioDurationMs: StateFlow<Long> = audioPlayer.durationMs
+    val isAudioPlaying: StateFlow<Boolean> = audioPlayer.isPlaying
+    val audioPlaybackSpeed: StateFlow<Float> = audioPlayer.playbackSpeed
+    val audioRepeatMode: StateFlow<com.example.audio.AudioRepeatMode> = audioPlayer.repeatMode
+    val isAudioMuted: StateFlow<Boolean> = audioPlayer.isMuted
+
+    // Navigation state: Tracks whether "Al Quran" full section (Surah/Juz list) is open (defaults to false to show main Quran cards)
     val isAlQuranOpened = MutableStateFlow(false)
 
     fun setAlQuranOpened(opened: Boolean) {
         isAlQuranOpened.value = opened
+    }
+
+    fun setFloatingAudioPlayerVisible(visible: Boolean) {
+        isFloatingAudioPlayerVisible.value = visible
+    }
+
+    fun toggleFloatingAudioPlayerExpanded() {
+        isFloatingAudioPlayerExpanded.value = !isFloatingAudioPlayerExpanded.value
+    }
+
+    fun setFloatingAudioPlayerExpanded(expanded: Boolean) {
+        isFloatingAudioPlayerExpanded.value = expanded
+    }
+
+    fun setRecentAudioBottomSheetOpen(open: Boolean) {
+        isRecentAudioBottomSheetOpen.value = open
+    }
+
+    fun setSurahPickerBottomSheetOpen(open: Boolean) {
+        isSurahPickerBottomSheetOpen.value = open
+    }
+
+    fun setReciterAudioBottomSheetOpen(open: Boolean) {
+        isReciterAudioBottomSheetOpen.value = open
+    }
+
+    fun selectSurahForAudio(surahNumber: Int) {
+        _selectedAudioSurahNumber.value = surahNumber.coerceIn(1, 114)
+    }
+
+    fun seekAudioTo(positionMs: Long) {
+        audioPlayer.seekTo(positionMs)
+    }
+
+    fun seekAudioForward() {
+        audioPlayer.seekForward(10000L)
+    }
+
+    fun seekAudioBackward() {
+        audioPlayer.seekBackward(10000L)
+    }
+
+    fun setPlaybackSpeed(speed: Float) {
+        audioPlayer.setPlaybackSpeed(speed)
+    }
+
+    fun cyclePlaybackSpeed() {
+        val speeds = listOf(1.0f, 1.25f, 1.5f, 2.0f, 0.75f)
+        val currentIndex = speeds.indexOf(audioPlaybackSpeed.value)
+        val nextSpeed = if (currentIndex != -1) speeds[(currentIndex + 1) % speeds.size] else 1.0f
+        audioPlayer.setPlaybackSpeed(nextSpeed)
+    }
+
+    fun toggleRepeatMode() {
+        audioPlayer.toggleRepeatMode()
+    }
+
+    fun toggleAudioMute() {
+        audioPlayer.toggleMute()
+    }
+
+    fun restartAudio() {
+        audioPlayer.restartTrack()
+    }
+
+    fun clearRecentAudios() {
+        recentAudioRepository.clearRecentSurahs()
     }
 
     // Reciters and Audio downloads
@@ -153,6 +245,25 @@ class QuranViewModel(application: Application) : AndroidViewModel(application) {
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     init {
+        audioPlayer.onNextTrackListener = {
+            viewModelScope.launch {
+                playNextAudioSurah()
+            }
+        }
+        audioPlayer.onPreviousTrackListener = {
+            viewModelScope.launch {
+                playPreviousAudioSurah()
+            }
+        }
+
+        audioPlayer.setOnCompletionListener {
+            viewModelScope.launch {
+                if (audioPlayer.repeatMode.value == com.example.audio.AudioRepeatMode.REPEAT_ALL) {
+                    playNextAudioSurah()
+                }
+            }
+        }
+
         // Preload complete Quran on background IO thread on ViewModel startup so search is instantaneous
         viewModelScope.launch(Dispatchers.IO) {
             com.example.data.repository.OfflineQuranProvider.preload(getApplication())
@@ -174,31 +285,24 @@ class QuranViewModel(application: Application) : AndroidViewModel(application) {
                         ayahs = emptyList()
                     )
                 } else {
-                    _isSearching.value = true
-                    _searchProgress.value = 15
-                    val progressJob = launch(Dispatchers.Main) {
-                        while (_isSearching.value && _searchProgress.value < 90) {
-                            kotlinx.coroutines.delay(50)
-                            if (_searchProgress.value < 90) {
-                                _searchProgress.value = (_searchProgress.value + 20).coerceAtMost(90)
-                            }
-                        }
-                    }
                     val trimmed = query.trim()
-                    val resultData = withContext(Dispatchers.IO) {
-                        val isAyahSearch = (mode == QuranSearchMode.BY_AYAH)
-                        val ayahs = quranRepository.searchAyahsOffline(
-                            context = getApplication(),
-                            query = trimmed,
-                            searchByAyah = isAyahSearch,
-                            langCode = if (isAyahSearch) "all" else lang.code,
-                            translationManager = translationManager
-                        )
+                    _isSearching.value = true
+                    _searchProgress.value = 10
+                    val isAyahSearch = (mode == QuranSearchMode.BY_AYAH)
 
-                        val matchingSurahs = if (isAyahSearch) {
+                    if (isAyahSearch) {
+                        // By Number: Fast direct search, no streaming batching
+                        val resultData = withContext(Dispatchers.IO) {
+                            val ayahs = quranRepository.searchAyahsOffline(
+                                context = getApplication(),
+                                query = trimmed,
+                                searchByAyah = true,
+                                langCode = "all",
+                                translationManager = translationManager
+                            )
                             val colonRegex = Regex("^(\\d{1,3})\\s*[:\\s-]\\s*(\\d{1,3})$")
                             val colonMatch = colonRegex.find(trimmed)
-                            if (colonMatch != null) {
+                            val matchingSurahs = if (colonMatch != null) {
                                 val sNum = colonMatch.groupValues[1].toIntOrNull() ?: 1
                                 quranRepository.searchQuran("").filter { it.number == sNum }
                             } else {
@@ -214,21 +318,54 @@ class QuranViewModel(application: Application) : AndroidViewModel(application) {
                                     quranRepository.searchQuran(trimmed)
                                 }
                             }
-                        } else {
+                            QuranSearchResultData(surahs = matchingSurahs, ayahs = ayahs)
+                        }
+                        _searchProgress.value = 100
+                        _searchResults.value = resultData
+                        _isSearching.value = false
+                    } else {
+                        // Word Search: Progressive streaming batch emission (1st match, then every 5 matches)
+                        _searchResults.value = QuranSearchResultData(
+                            surahs = quranRepository.searchQuran(trimmed),
+                            ayahs = emptyList()
+                        )
+                        try {
+                            val allSurahs = quranRepository.searchQuran("")
                             val directMatches = quranRepository.searchQuran(trimmed)
                             val directNumbers = directMatches.map { it.number }.toSet()
-                            val surahsFromAyahs = ayahs.map { it.first.number }.toSet()
-                            val allSurahs = quranRepository.searchQuran("")
-                            val additionalSurahs = allSurahs.filter { it.number in surahsFromAyahs && it.number !in directNumbers }
-                            directMatches + additionalSurahs
-                        }
 
-                        QuranSearchResultData(surahs = matchingSurahs, ayahs = ayahs)
+                            quranRepository.searchAyahsOfflineFlow(
+                                context = getApplication(),
+                                query = trimmed,
+                                langCode = lang.code,
+                                translationManager = translationManager
+                            ).collect { batch ->
+                                val surahsFromAyahs = batch.results.map { it.first.number }.toSet()
+                                val additionalSurahs = allSurahs.filter { it.number in surahsFromAyahs && it.number !in directNumbers }
+                                val matchingSurahs = directMatches + additionalSurahs
+
+                                _searchResults.value = QuranSearchResultData(
+                                    surahs = matchingSurahs,
+                                    ayahs = batch.results
+                                )
+                                _searchProgress.value = batch.progress
+                                if (batch.isComplete) {
+                                    _isSearching.value = false
+                                }
+                            }
+                            _searchProgress.value = 100
+                            _isSearching.value = false
+                        } catch (e: kotlinx.coroutines.CancellationException) {
+                            throw e
+                        } catch (_: Exception) {
+                            _searchResults.value = QuranSearchResultData(
+                                surahs = quranRepository.searchQuran(trimmed),
+                                ayahs = emptyList()
+                            )
+                            _searchProgress.value = 100
+                            _isSearching.value = false
+                        }
                     }
-                    progressJob.cancel()
-                    _searchProgress.value = 100
-                    _searchResults.value = resultData
-                    _isSearching.value = false
                 }
             }
         }
@@ -313,10 +450,7 @@ class QuranViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun playSurahAudio(surah: Surah, reciter: QuranReciter = _selectedReciter.value) {
-        // Strict user mandate: Full Surah audio must NOT play without downloading first!
-        if (!isReciterDownloaded(surah.number, reciter.id)) {
-            return
-        }
+        _selectedAudioSurahNumber.value = surah.number
 
         val trackId = "surah_${surah.number}_${reciter.id}"
         val legacyTrackId = "surah_${surah.number}"
@@ -326,25 +460,118 @@ class QuranViewModel(application: Application) : AndroidViewModel(application) {
             is AudioPlaybackState.Playing -> {
                 if (state.trackId == trackId || (reciter.id == "ar.alafasy" && state.trackId == legacyTrackId)) {
                     audioPlayer.pause()
+                    recentAudioRepository.updateProgress(
+                        surah.number,
+                        reciter.id,
+                        audioPlayer.currentPositionMs.value,
+                        audioPlayer.durationMs.value
+                    )
                     return
                 }
             }
             is AudioPlaybackState.Paused -> {
                 if (state.trackId == trackId || (reciter.id == "ar.alafasy" && state.trackId == legacyTrackId)) {
-                    val localFile = audioDownloadManager.getLocalAudioFile(surah.number, reciter.id)
-                    if (localFile != null && localFile.exists()) {
-                        audioPlayer.play(localFile.absolutePath, trackId)
-                    }
+                    audioPlayer.resume()
+                    return
+                }
+            }
+            is AudioPlaybackState.Loading -> {
+                if (state.trackId == trackId || (reciter.id == "ar.alafasy" && state.trackId == legacyTrackId)) {
                     return
                 }
             }
             else -> {}
         }
 
-        // Play downloaded audio file exclusively
+        // Determine audio source: local downloaded file if available, otherwise progressive streaming
         val localFile = audioDownloadManager.getLocalAudioFile(surah.number, reciter.id)
-        if (localFile != null && localFile.exists()) {
-            audioPlayer.play(localFile.absolutePath, trackId)
+        val audioSource = if (localFile != null && localFile.exists() && localFile.length() > 0) {
+            localFile.absolutePath
+        } else {
+            // Remote url: the player streams it (starts in ~1s) and fills the session cache while playing
+            reciter.getAudioUrl(surah.number)
+        }
+
+        val metadata = com.example.audio.CurrentTrackMetadata(
+            surahNumber = surah.number,
+            surahEnglishName = surah.englishName,
+            surahArabicName = surah.arabicName,
+            surahUrduName = surah.urduName,
+            reciterName = reciter.englishName,
+            reciterId = reciter.id,
+            numberOfAyahs = surah.numberOfAyahs
+        )
+        audioPlayer.play(
+            urlOrPath = audioSource,
+            trackId = trackId,
+            metadata = metadata,
+            fallbackUrl = reciter.getFallbackAudioUrl(surah.number)
+        )
+        recentAudioRepository.recordRecentPlay(
+            surahNumber = surah.number,
+            surahEnglishName = surah.englishName,
+            surahArabicName = surah.arabicName,
+            surahUrduName = surah.urduName,
+            reciterId = reciter.id,
+            reciterName = reciter.englishName,
+            positionMs = 0L,
+            durationMs = audioPlayer.durationMs.value
+        )
+    }
+
+    fun toggleAudioPlayPause(surahNumber: Int = _selectedAudioSurahNumber.value, reciter: QuranReciter = _selectedReciter.value) {
+        val surah = surahs.value.find { it.number == surahNumber }
+            ?: currentSurah.value
+            ?: quranRepository.searchQuran("").firstOrNull { it.number == surahNumber }
+        if (surah == null) return
+        val trackId = "surah_${surah.number}_${reciter.id}"
+        val legacyTrackId = "surah_${surah.number}"
+
+        when (val state = audioPlaybackState.value) {
+            is AudioPlaybackState.Playing -> {
+                if (state.trackId == trackId || (reciter.id == "ar.alafasy" && state.trackId == legacyTrackId)) {
+                    audioPlayer.pause()
+                } else {
+                    playSurahAudio(surah, reciter)
+                }
+            }
+            is AudioPlaybackState.Paused -> {
+                if (state.trackId == trackId || (reciter.id == "ar.alafasy" && state.trackId == legacyTrackId)) {
+                    audioPlayer.resume()
+                } else {
+                    playSurahAudio(surah, reciter)
+                }
+            }
+            is AudioPlaybackState.Loading -> {
+                if (state.trackId == trackId || (reciter.id == "ar.alafasy" && state.trackId == legacyTrackId)) {
+                    audioPlayer.pause()
+                } else {
+                    playSurahAudio(surah, reciter)
+                }
+            }
+            else -> {
+                playSurahAudio(surah, reciter)
+            }
+        }
+    }
+
+    fun playNextAudioSurah() {
+        val current = _selectedAudioSurahNumber.value
+        val next = if (current < 114) current + 1 else 1
+        _selectedAudioSurahNumber.value = next
+        val surah = surahs.value.find { it.number == next }
+        if (surah != null) {
+            playSurahAudio(surah, _selectedReciter.value)
+        }
+    }
+
+    fun playPreviousAudioSurah() {
+        val current = _selectedAudioSurahNumber.value
+        val prev = if (current > 1) current - 1 else 114
+        _selectedAudioSurahNumber.value = prev
+        val surah = surahs.value.find { it.number == prev }
+        if (surah != null) {
+            playSurahAudio(surah, _selectedReciter.value)
         }
     }
 

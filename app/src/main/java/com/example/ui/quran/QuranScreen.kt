@@ -8,6 +8,8 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -55,7 +57,9 @@ fun QuranScreen(
     onLocationClick: () -> Unit,
     onSurahSelected: (Int) -> Unit,
     onAyahSelected: (Int, Int) -> Unit = { surahNum, _ -> onSurahSelected(surahNum) },
-    modifier: Modifier = Modifier
+    isDrawerOpen: Boolean = false,
+    modifier: Modifier = Modifier,
+    onOpen16LineQuran: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val clipboardManager = LocalClipboardManager.current
@@ -77,36 +81,82 @@ fun QuranScreen(
     var showLanguageDropdown by remember { mutableStateOf(false) }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
+    // Floating Audio Player states
+    val selectedAudioSurahNumber by viewModel.selectedAudioSurahNumber.collectAsStateWithLifecycle()
+    val selectedReciter by viewModel.selectedReciter.collectAsStateWithLifecycle()
+    val isFloatingAudioPlayerVisible by viewModel.isFloatingAudioPlayerVisible.collectAsStateWithLifecycle()
+    val isFloatingAudioPlayerExpanded by viewModel.isFloatingAudioPlayerExpanded.collectAsStateWithLifecycle()
+    val isRecentAudioSheetOpen by viewModel.isRecentAudioBottomSheetOpen.collectAsStateWithLifecycle()
+    val isSurahPickerSheetOpen by viewModel.isSurahPickerBottomSheetOpen.collectAsStateWithLifecycle()
+    val isReciterAudioSheetOpen by viewModel.isReciterAudioBottomSheetOpen.collectAsStateWithLifecycle()
+    val recentAudioSurahs by viewModel.recentAudioSurahs.collectAsStateWithLifecycle()
+    val currentPositionMs by viewModel.audioCurrentPositionMs.collectAsStateWithLifecycle()
+    val durationMs by viewModel.audioDurationMs.collectAsStateWithLifecycle()
+    val playbackSpeed by viewModel.audioPlaybackSpeed.collectAsStateWithLifecycle()
+    val repeatMode by viewModel.audioRepeatMode.collectAsStateWithLifecycle()
+    val downloadingKeys by viewModel.downloadingKeys.collectAsStateWithLifecycle()
+    val downloadProgressMap by viewModel.downloadProgressMap.collectAsStateWithLifecycle()
+    val downloadStatusMap by viewModel.downloadStatusMap.collectAsStateWithLifecycle()
+    val downloadedRecitersMap by viewModel.downloadedRecitersMap.collectAsStateWithLifecycle()
+
+    val activeAudioSurah = remember(selectedAudioSurahNumber, surahs) {
+        surahs.find { it.number == selectedAudioSurahNumber } ?: surahs.firstOrNull() ?: Surah(
+            number = 1,
+            englishName = "Al-Fatihah",
+            urduName = "الفاتحہ",
+            arabicName = "سُورَةُ الْفَاتِحَةِ",
+            englishTranslation = "The Opening",
+            revelationType = "Meccan",
+            numberOfAyahs = 7,
+            rukuCount = 1
+        )
+    }
+    val isAudioDownloaded = viewModel.isReciterDownloaded(activeAudioSurah.number, selectedReciter.id)
+    val hasAnyAudioDownloaded = downloadedSurahs.contains(activeAudioSurah.number) || (downloadedRecitersMap[activeAudioSurah.number]?.isNotEmpty() == true)
+    val downloadKey = "${activeAudioSurah.number}_${selectedReciter.id}"
+    val isAudioDownloading = downloadingKeys.contains(downloadKey)
+    val audioDownloadProgress = downloadProgressMap[downloadKey] ?: 0f
+
     // Back handler: return to Quran section block when Al Quran is opened
     BackHandler(enabled = isAlQuranOpened) {
         viewModel.setAlQuranOpened(false)
     }
 
-    Column(
+    Box(
         modifier = modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
             .testTag("quran_screen_root")
     ) {
+        Column(
+            modifier = Modifier.fillMaxSize()
+        ) {
         if (!isAlQuranOpened) {
-            // Main Quran Section View with consistent Header, Compact Dashboard, and "Al Quran" Block
-            com.example.ui.components.AlDeenHeader(
-                location = location,
-                onMenuClick = onOpenDrawer,
-                onLocationClick = onLocationClick
-            )
-
+            // Main Quran Section View with smooth top-to-bottom vertical scroll
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(horizontal = AlDeenTokens.SpacingLarge)
+                    .verticalScroll(rememberScrollState())
+                    .padding(bottom = 140.dp)
             ) {
-                // Compact Prayer Dashboard
-                com.example.ui.components.CompactPrayerDashboardCard(
-                    prayerState = prayerState,
-                    formattedCurrentTime = formattedCurrentTime,
-                    formattedUpcomingTime = formattedUpcomingTime
+                com.example.ui.components.AlDeenHeader(
+                    location = location,
+                    onMenuClick = onOpenDrawer,
+                    onLocationClick = onLocationClick,
+                    isMenuOpen = isDrawerOpen
                 )
+
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = AlDeenTokens.SpacingLarge)
+                ) {
+                    // Compact Prayer Dashboard
+                    com.example.ui.components.CompactPrayerDashboardCard(
+                        prayerState = prayerState,
+                        formattedCurrentTime = formattedCurrentTime,
+                        formattedUpcomingTime = formattedUpcomingTime
+                    )
 
                 Spacer(modifier = Modifier.height(16.dp))
 
@@ -141,143 +191,12 @@ fun QuranScreen(
 
                 Spacer(modifier = Modifier.height(16.dp))
 
-                // The "Al Quran" Block
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { viewModel.setAlQuranOpened(true) }
-                        .testTag("al_quran_block"),
-                    shape = AlDeenTokens.ShapeCard,
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                    border = BorderStroke(1.5.dp, EmeraldPrimary.copy(alpha = 0.5f)),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
-                ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(20.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Surface(
-                                shape = CircleShape,
-                                color = EmeraldContainer,
-                                modifier = Modifier.size(52.dp)
-                            ) {
-                                Box(contentAlignment = Alignment.Center) {
-                                    Icon(
-                                        imageVector = Icons.Default.AutoStories,
-                                        contentDescription = "Al Quran",
-                                        tint = EmeraldPrimary,
-                                        modifier = Modifier.size(28.dp)
-                                    )
-                                }
-                            }
-
-                            Surface(
-                                shape = AlDeenTokens.ShapePill,
-                                color = EmeraldContainer
-                            ) {
-                                Text(
-                                    text = "114 Surahs • 30 Paras",
-                                    style = MaterialTheme.typography.labelSmall.copy(
-                                        color = OnEmeraldContainer,
-                                        fontWeight = FontWeight.Bold
-                                    ),
-                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
-                                )
-                            }
-                        }
-
-                        Spacer(modifier = Modifier.height(16.dp))
-
-                        AlDeenText(
-                            text = "Al Quran (القرآن الكريم)",
-                            style = MaterialTheme.typography.titleLarge.copy(
-                                fontWeight = FontWeight.Bold,
-                                color = EmeraldPrimary,
-                                fontSize = 22.sp
-                            )
-                        )
-
-                        Spacer(modifier = Modifier.height(6.dp))
-
-                        Text(
-                            text = "Explore all 114 Surahs and 30 Paras (Juz) with authentic translations, word-by-word meanings, and offline audio recitations.",
-                            style = MaterialTheme.typography.bodyMedium.copy(
-                                color = TextSecondary,
-                                lineHeight = 20.sp
-                            )
-                        )
-
-                        Spacer(modifier = Modifier.height(16.dp))
-
-                        // Stats Highlights
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Surface(
-                                shape = AlDeenTokens.ShapeSmallCard,
-                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Column(
-                                    modifier = Modifier.padding(vertical = 8.dp),
-                                    horizontalAlignment = Alignment.CenterHorizontally
-                                ) {
-                                    Text("114", fontWeight = FontWeight.Bold, color = TextPrimary)
-                                    Text("Surahs", style = MaterialTheme.typography.labelSmall, color = TextSecondary)
-                                }
-                            }
-
-                            Surface(
-                                shape = AlDeenTokens.ShapeSmallCard,
-                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Column(
-                                    modifier = Modifier.padding(vertical = 8.dp),
-                                    horizontalAlignment = Alignment.CenterHorizontally
-                                ) {
-                                    Text("30", fontWeight = FontWeight.Bold, color = TextPrimary)
-                                    Text("Paras", style = MaterialTheme.typography.labelSmall, color = TextSecondary)
-                                }
-                            }
-
-                            Surface(
-                                shape = AlDeenTokens.ShapeSmallCard,
-                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Column(
-                                    modifier = Modifier.padding(vertical = 8.dp),
-                                    horizontalAlignment = Alignment.CenterHorizontally
-                                ) {
-                                    Text("6,236", fontWeight = FontWeight.Bold, color = TextPrimary)
-                                    Text("Ayahs", style = MaterialTheme.typography.labelSmall, color = TextSecondary)
-                                }
-                            }
-                        }
-
-                        Spacer(modifier = Modifier.height(16.dp))
-
-                        Button(
-                            onClick = { viewModel.setAlQuranOpened(true) },
-                            colors = ButtonDefaults.buttonColors(containerColor = EmeraldPrimary),
-                            shape = AlDeenTokens.ShapePill,
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Icon(Icons.Default.MenuBook, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text("Open Al Quran", fontWeight = FontWeight.Bold)
-                        }
-                    }
-                }
+                com.example.ui.quran16.QuranEntryCards(
+                    onTranslation = { viewModel.setAlQuranOpened(true) },
+                    onPdf = onOpen16LineQuran
+                )
             }
+        }
         } else {
             // Inside "Al Quran" Directory
             Column(
@@ -598,11 +517,11 @@ fun QuranScreen(
 
             // Content: Live Search Results if searching, else Tab Content
             if (searchQuery.isNotBlank()) {
-                if (isSearching) {
+                if (isSearching && ayahSearchResults.isEmpty()) {
                     Box(
                         modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(28.dp),
+                            .fillMaxSize()
+                            .padding(40.dp),
                         contentAlignment = Alignment.Center
                     ) {
                         Column(
@@ -610,80 +529,92 @@ fun QuranScreen(
                         ) {
                             CircularProgressIndicator(
                                 color = EmeraldPrimary,
-                                modifier = Modifier.size(28.dp),
+                                modifier = Modifier.size(32.dp),
                                 strokeWidth = 2.5.dp
                             )
-                            Spacer(modifier = Modifier.height(6.dp))
+                            Spacer(modifier = Modifier.height(12.dp))
                             AlDeenText(
-                                text = "Searching... $searchProgress%",
-                                style = MaterialTheme.typography.labelSmall.copy(
+                                text = "Searching across Holy Quran... $searchProgress%",
+                                style = MaterialTheme.typography.bodyMedium.copy(
                                     color = TextSecondary,
                                     fontWeight = FontWeight.Medium
                                 )
                             )
                         }
                     }
-                }
-
-                LazyColumn(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(horizontal = AlDeenTokens.SpacingLarge),
-                    verticalArrangement = Arrangement.spacedBy(AlDeenTokens.SpacingSmall),
-                    contentPadding = PaddingValues(vertical = AlDeenTokens.SpacingMedium)
-                ) {
-                    if (!isSearching && ayahSearchResults.isEmpty()) {
-                        item {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(32.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(
-                                    text = "No Quran verses found for \"$searchQuery\"",
-                                    style = MaterialTheme.typography.bodyMedium.copy(color = TextSecondary),
-                                    textAlign = TextAlign.Center
+                } else {
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(horizontal = AlDeenTokens.SpacingLarge),
+                        verticalArrangement = Arrangement.spacedBy(AlDeenTokens.SpacingSmall),
+                        contentPadding = PaddingValues(vertical = AlDeenTokens.SpacingMedium)
+                    ) {
+                        if (isSearching) {
+                            item {
+                                LinearProgressIndicator(
+                                    progress = { (searchProgress.coerceIn(1, 100)) / 100f },
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 4.dp),
+                                    color = EmeraldPrimary,
+                                    trackColor = MintSurface
                                 )
                             }
                         }
-                    }
 
-                    if (ayahSearchResults.isNotEmpty()) {
-                        item {
-                            Surface(
-                                shape = RoundedCornerShape(8.dp),
-                                color = EmeraldContainer.copy(alpha = 0.5f),
-                                border = BorderStroke(0.8.dp, MintBorder),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(bottom = 6.dp)
-                            ) {
-                                Row(
+                        if (!isSearching && ayahSearchResults.isEmpty()) {
+                            item {
+                                Box(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .padding(horizontal = 12.dp, vertical = 8.dp),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
+                                        .padding(32.dp),
+                                    contentAlignment = Alignment.Center
                                 ) {
                                     Text(
-                                        text = "${ayahSearchResults.size} verses found",
-                                        style = MaterialTheme.typography.labelMedium.copy(
-                                            fontWeight = FontWeight.Bold,
-                                            color = EmeraldPrimary,
-                                            fontSize = 13.sp
-                                        )
-                                    )
-                                    Text(
-                                        text = "Tap verse to read in Surah",
-                                        style = MaterialTheme.typography.labelSmall.copy(
-                                            color = TextSecondary,
-                                            fontSize = 11.5.sp
-                                        )
+                                        text = "No Quran verses found for \"$searchQuery\"",
+                                        style = MaterialTheme.typography.bodyMedium.copy(color = TextSecondary),
+                                        textAlign = TextAlign.Center
                                     )
                                 }
                             }
                         }
+
+                        if (ayahSearchResults.isNotEmpty()) {
+                            item {
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = EmeraldContainer.copy(alpha = 0.5f),
+                                    border = BorderStroke(0.8.dp, MintBorder),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(bottom = 6.dp)
+                                ) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = if (isSearching) "Searching... Found ${ayahSearchResults.size} verses" else "${ayahSearchResults.size} verses found",
+                                            style = MaterialTheme.typography.labelMedium.copy(
+                                                fontWeight = FontWeight.Bold,
+                                                color = EmeraldPrimary,
+                                                fontSize = 13.sp
+                                            )
+                                        )
+                                        Text(
+                                            text = "Tap verse to read in Surah",
+                                            style = MaterialTheme.typography.labelSmall.copy(
+                                                color = TextSecondary,
+                                                fontSize = 11.5.sp
+                                            )
+                                        )
+                                    }
+                                }
+                            }
 
                         items(
                             items = ayahSearchResults,
@@ -788,25 +719,32 @@ fun QuranScreen(
                         }
                     }
                 }
-            } else if (selectedTab == 0) {
+            }
+        } else if (selectedTab == 0) {
                 // Surahs List
                 LazyColumn(
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(horizontal = AlDeenTokens.SpacingLarge),
                     verticalArrangement = Arrangement.spacedBy(AlDeenTokens.SpacingSmall),
-                    contentPadding = PaddingValues(vertical = AlDeenTokens.SpacingMedium)
+                    contentPadding = PaddingValues(top = AlDeenTokens.SpacingMedium, bottom = if (isFloatingAudioPlayerVisible && isFloatingAudioPlayerExpanded) 330.dp else 120.dp)
                 ) {
                     items(surahs, key = { it.number }) { surah ->
                         val isPlaying = audioState is AudioPlaybackState.Playing &&
-                                (audioState as AudioPlaybackState.Playing).trackId == "surah_${surah.number}"
-                        val isDownloaded = downloadedSurahs.contains(surah.number)
+                                (((audioState as AudioPlaybackState.Playing).trackId.startsWith("surah_${surah.number}_")) ||
+                                 ((audioState as AudioPlaybackState.Playing).trackId == "surah_${surah.number}"))
+                        val isDownloaded = downloadedSurahs.contains(surah.number) ||
+                                (downloadedRecitersMap[surah.number]?.contains(selectedReciter.id) == true)
 
                         SurahListItem(
                             surah = surah,
                             isPlaying = isPlaying,
                             isDownloaded = isDownloaded,
-                            onPlayClick = { viewModel.playSurahAudio(surah) },
+                            onPlayClick = {
+                                viewModel.selectSurahForAudio(surah.number)
+                                viewModel.playSurahAudio(surah, selectedReciter)
+                                viewModel.setFloatingAudioPlayerVisible(true)
+                            },
                             onSurahClick = {
                                 viewModel.openSurah(surah.number, fromPara = false)
                                 onSurahSelected(surah.number)
@@ -821,7 +759,7 @@ fun QuranScreen(
                         .fillMaxSize()
                         .padding(horizontal = AlDeenTokens.SpacingLarge),
                     verticalArrangement = Arrangement.spacedBy(AlDeenTokens.SpacingSmall),
-                    contentPadding = PaddingValues(vertical = AlDeenTokens.SpacingMedium)
+                    contentPadding = PaddingValues(top = AlDeenTokens.SpacingMedium, bottom = if (isFloatingAudioPlayerVisible && isFloatingAudioPlayerExpanded) 330.dp else 120.dp)
                 ) {
                     items(viewModel.juzList, key = { it.juzNumber }) { juz ->
                         JuzListItem(
@@ -954,6 +892,7 @@ fun QuranScreen(
             }
         }
     }
+}
 }
 
 @Composable

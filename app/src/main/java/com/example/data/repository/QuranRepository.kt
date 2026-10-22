@@ -8,10 +8,19 @@ import com.example.domain.model.QuranWord
 import com.example.domain.model.Surah
 import com.example.domain.util.ArabicNormalizationUtils
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.withContext
 import java.util.concurrent.ConcurrentHashMap
+
+data class QuranSearchBatch(
+    val results: List<Pair<Surah, Ayah>>,
+    val progress: Int,
+    val isComplete: Boolean = false
+)
 
 class QuranRepository(private val context: Context? = null) {
 
@@ -334,6 +343,81 @@ class QuranRepository(private val context: Context? = null) {
 
         return results
     }
+
+    /**
+     * Flow-based streaming word search across the entire Quran.
+     * Emits progressively (1st match immediately, then batches of 5)
+     * running safely on background IO dispatcher without freezing or lagging the UI.
+     */
+    fun searchAyahsOfflineFlow(
+        context: Context?,
+        query: String,
+        langCode: String,
+        translationManager: com.example.data.quran.QuranTranslationManager? = null
+    ): Flow<QuranSearchBatch> = flow {
+        if (query.isBlank()) {
+            emit(QuranSearchBatch(results = emptyList(), progress = 100, isComplete = true))
+            return@flow
+        }
+        val trimmed = query.trim()
+        val allSurahs = AuthoritativeContentProvider.allSurahs
+        val totalSurahs = allSurahs.size
+        val allAyahsBySurah = OfflineQuranProvider.getAllSurahAyahs(context)
+
+        val accumulatedResults = mutableListOf<Pair<Surah, Ayah>>()
+        var unemittedCount = 0
+
+        val expandedQueries = com.example.domain.util.IslamicSearchKeywords.getExpandedQueries(trimmed)
+
+        for ((surahIndex, surah) in allSurahs.withIndex()) {
+            currentCoroutineContext().ensureActive()
+
+            val progress = (((surahIndex + 1) * 100) / totalSurahs).coerceIn(1, 99)
+            val ayahs = allAyahsBySurah[surah.number] ?: OfflineQuranProvider.getAyahsForSurah(context, surah.number)
+
+            for (ayah in ayahs) {
+                val activeText = resolveTranslation(ayah, langCode, translationManager)
+                var isMatch = false
+
+                for (q in expandedQueries) {
+                    val isScript = q.any { it in '\u0600'..'\u06FF' || it in '\u0750'..'\u077F' || it in '\uFB50'..'\uFDFF' || it in '\uFE70'..'\uFEFF' }
+                    if (isScript) {
+                        if (ArabicNormalizationUtils.containsNormalized(ayah.textArabic, q) ||
+                            ArabicNormalizationUtils.containsNormalized(ayah.urduTranslation, q) ||
+                            ayah.urduTranslation.contains(q, ignoreCase = true) ||
+                            (activeText.isNotBlank() && (ArabicNormalizationUtils.containsNormalized(activeText, q) || activeText.contains(q, ignoreCase = true)))
+                        ) {
+                            isMatch = true
+                            break
+                        }
+                    } else {
+                        // Latin / English query
+                        if (ayah.textTranslation.contains(q, ignoreCase = true) ||
+                            ayah.urduTranslation.contains(q, ignoreCase = true) ||
+                            activeText.contains(q, ignoreCase = true) ||
+                            ArabicNormalizationUtils.containsNormalized(ayah.textArabic, q)
+                        ) {
+                            isMatch = true
+                            break
+                        }
+                    }
+                }
+
+                if (isMatch) {
+                    accumulatedResults.add(Pair(surah, ayah.copy(textTranslation = activeText)))
+                    unemittedCount++
+
+                    // Instant 1st match, and every 5 matches
+                    if (accumulatedResults.size == 1 || unemittedCount >= 5) {
+                        emit(QuranSearchBatch(results = accumulatedResults.toList(), progress = progress))
+                        unemittedCount = 0
+                    }
+                }
+            }
+        }
+
+        emit(QuranSearchBatch(results = accumulatedResults.toList(), progress = 100, isComplete = true))
+    }.flowOn(Dispatchers.IO)
 
     private fun resolveTranslation(
         ayah: Ayah,

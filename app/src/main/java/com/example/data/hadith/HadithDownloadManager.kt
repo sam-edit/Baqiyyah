@@ -86,9 +86,70 @@ class HadithDownloadManager(private val context: Context) {
 
     private val activeJobs = ConcurrentHashMap<String, Job>()
 
+    // Temporary online (API) translations: shown when a language card is tapped, NOT saved as "downloaded".
+    // Stored in cacheDir only for the current app session; cleared on next app start.
+    private val onlineDir = File(context.cacheDir, "hadith_online").apply { mkdirs() }
+    private val _onlineLoadingKeys = MutableStateFlow<Set<String>>(emptySet())
+    val onlineLoadingKeys: StateFlow<Set<String>> = _onlineLoadingKeys.asStateFlow()
+    private val _onlineErrorKeys = MutableStateFlow<Set<String>>(emptySet())
+    val onlineErrorKeys: StateFlow<Set<String>> = _onlineErrorKeys.asStateFlow()
+
     init {
         extractBundledAssetsIfNeeded()
+        try { onlineDir.listFiles()?.forEach { it.delete() } } catch (_: Exception) {}
         refreshAllStatuses()
+    }
+
+    fun getOnlineLanguageFile(bookSlug: String, langCode: String): File? {
+        val norm = normalizeLang(langCode)
+        val file = File(onlineDir, "${bookSlug}_${norm}.json")
+        return if (isLanguageFileValid(file, norm)) file else null
+    }
+
+    fun isLanguageLoadingOnline(bookSlug: String, langCode: String): Boolean =
+        _onlineLoadingKeys.value.contains("${bookSlug}_${normalizeLang(langCode)}")
+
+    fun hasOnlineLanguageFailed(bookSlug: String, langCode: String): Boolean =
+        _onlineErrorKeys.value.contains("${bookSlug}_${normalizeLang(langCode)}")
+
+    /**
+     * API call for a single language (no permanent download).
+     * Does nothing if the language is already downloaded or already fetched this session.
+     */
+    fun fetchLanguageOnline(bookSlug: String, langCode: String) {
+        val norm = normalizeLang(langCode)
+        val key = "${bookSlug}_$norm"
+        if (isLanguageDownloaded(bookSlug, norm)) return
+        if (getOnlineLanguageFile(bookSlug, norm) != null) return
+        if (!isBookDownloaded(bookSlug)) return
+        val jobKey = "online_$key"
+        if (activeJobs[jobKey]?.isActive == true) return
+
+        _onlineErrorKeys.value = _onlineErrorKeys.value - key
+        _onlineLoadingKeys.value = _onlineLoadingKeys.value + key
+        val job = appScope.launch {
+            val edition = getEditionName(bookSlug)
+            val target = File(onlineDir, "${bookSlug}_${norm}.json")
+            try {
+                val ok = downloadWithFallbacks("${norm}-$edition.min.json", target) { }
+                if (ok && isLanguageFileValid(target, norm)) {
+                    notifyTranslationsChanged()
+                } else {
+                    target.delete()
+                    _onlineErrorKeys.value = _onlineErrorKeys.value + key
+                }
+            } catch (e: CancellationException) {
+                target.delete()
+                throw e
+            } catch (_: Exception) {
+                target.delete()
+                _onlineErrorKeys.value = _onlineErrorKeys.value + key
+            } finally {
+                _onlineLoadingKeys.value = _onlineLoadingKeys.value - key
+                activeJobs.remove(jobKey)
+            }
+        }
+        activeJobs[jobKey] = job
     }
 
     private fun extractBundledAssetsIfNeeded() {
@@ -475,6 +536,7 @@ class HadithDownloadManager(private val context: Context) {
                 }
 
                 if (ok && isLanguageFileValid(targetFile, normLang)) {
+                    try { File(onlineDir, "${bookSlug}_${normLang}.json").delete() } catch (_: Exception) {}
                     updateLanguageStatus(bookSlug, normLang, HadithDownloadState.Downloaded)
                     notifyTranslationsChanged()
                 } else {

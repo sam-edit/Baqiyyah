@@ -178,7 +178,7 @@ fun ContactUsScreen(
                                 )
                             )
                             Text(
-                                text = "ruleno1corp@gmail.com",
+                                text = "ruleno1support@gmail.com",
                                 style = MaterialTheme.typography.bodyMedium.copy(
                                     fontWeight = FontWeight.Bold,
                                     color = EmeraldPrimary,
@@ -193,7 +193,7 @@ fun ContactUsScreen(
                     // Action button to open Email app directly
                     Button(
                         onClick = {
-                            val recipient = "ruleno1corp@gmail.com"
+                            val recipient = "ruleno1support@gmail.com"
                             val subject = "Baqiyyah Support - Suggestions & Feedback"
                             val encodedSubject = Uri.encode(subject)
                             val mailtoUri = Uri.parse("mailto:$recipient?subject=$encodedSubject")
@@ -306,7 +306,7 @@ fun ContactUsScreen(
                 Spacer(modifier = Modifier.height(6.dp))
 
                 Text(
-                    text = "ruleno1studio",
+                    text = "Ruleno1studio",
                     style = MaterialTheme.typography.labelMedium.copy(
                         fontWeight = FontWeight.Medium,
                         color = TextSecondary,

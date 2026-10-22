@@ -366,7 +366,7 @@ fun AboutUsScreen(
 
                 // Studio Name Label below logo
                 Text(
-                    text = "ruleno1studio",
+                    text = "Ruleno1studio",
                     style = MaterialTheme.typography.labelMedium.copy(
                         fontWeight = FontWeight.Medium,
                         color = TextSecondary,

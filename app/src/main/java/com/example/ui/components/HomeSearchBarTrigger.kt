@@ -18,6 +18,7 @@ import com.example.ui.theme.AlDeenTokens
 import com.example.ui.theme.EmeraldPrimary
 import com.example.ui.theme.MintBorder
 import com.example.ui.theme.TextSecondary
+import com.example.ui.theme.pressScaleEffect
 
 @Composable
 fun HomeSearchBarTrigger(
@@ -28,6 +29,7 @@ fun HomeSearchBarTrigger(
         modifier = modifier
             .fillMaxWidth()
             .clip(AlDeenTokens.ShapePill)
+            .pressScaleEffect(0.97f)
             .clickable { onClick() }
             .testTag("home_search_bar_trigger"),
         shape = AlDeenTokens.ShapePill,

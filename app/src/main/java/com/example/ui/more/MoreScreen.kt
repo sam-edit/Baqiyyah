@@ -32,6 +32,7 @@ enum class MoreItemType(
     val icon: ImageVector,
     val route: String
 ) {
+    SHARE_HAPPINESS("Share Happiness", "خوشیاں بانٹیں", Icons.Default.AutoAwesome, "more_share_happiness"),
     QIBLA("Qibla Compass", "قبلہ نما", Icons.Default.Explore, "more_qibla"),
     TASBEEH("Tasbeeh Counter", "تسبیح کاؤنٹر", Icons.Default.TouchApp, "more_tasbeeh"),
     CALENDAR("Islamic Calendar", "اسلامی کیلنڈر", Icons.Default.CalendarMonth, "more_calendar"),
@@ -50,6 +51,8 @@ fun MoreScreen(
     onOpenDrawer: () -> Unit,
     onLocationClick: () -> Unit,
     onNavigateToItem: (String) -> Unit,
+    isDrawerOpen: Boolean = false,
+    bannerState: com.example.data.repository.BannerState = com.example.data.repository.BannerState(),
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -63,7 +66,8 @@ fun MoreScreen(
         com.example.ui.components.AlDeenHeader(
             location = location,
             onMenuClick = onOpenDrawer,
-            onLocationClick = onLocationClick
+            onLocationClick = onLocationClick,
+            isMenuOpen = isDrawerOpen
         )
 
         // Compact Prayer Dashboard
@@ -120,10 +124,16 @@ fun MoreScreen(
             verticalArrangement = Arrangement.spacedBy(AlDeenTokens.SpacingMedium),
             contentPadding = PaddingValues(top = AlDeenTokens.SpacingMedium, bottom = AlDeenTokens.SpacingXXLarge)
         ) {
+            if (bannerState.visible) {
+                item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }) {
+                    com.example.ui.components.AppConfigBanner(state = bannerState)
+                }
+            }
             items(MoreItemType.values()) { item ->
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
+                        .pressScaleEffect(0.96f)
                         .clickable {
                             if (item.route == "more_find_masjid") {
                                 try {
