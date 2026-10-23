@@ -1,4 +1,4 @@
-# Baqiyyah – Enduring Deeds, Eternal Rewards ✨
+# Baqiyyah – Enduring Deeds, Eternal Rewards✨
 
 Inspired by the Quranic concept of **“Al-Baqiyat as-Salihat”** (the enduring good deeds), **Baqiyyah** is designed to help you integrate meaningful worship and daily remembrance into your busy modern life.
 
